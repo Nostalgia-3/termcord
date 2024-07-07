@@ -321,7 +321,7 @@ class App {
     setupDirectory() {
         if(Deno.build.os == 'windows') {
             // @TODO implement this !!
-            const home = Deno.env.get('APPDATA') as string;
+            const home = Deno.env.get('AppData') as string;
 
             if(!existsSync(home + '/.termcord')) {
                 Deno.mkdirSync(home + '/.termcord');
