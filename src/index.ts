@@ -4,7 +4,6 @@ import { ColorPanel, PlainText, ScrollableList, TermControls, Component, TextPan
 import { existsSync } from 'https://deno.land/std@0.224.0/fs/mod.ts';
 
 import { Keypress, readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
-import * as compress from "https://deno.land/x/compress@v0.4.6/zlib/mod.ts";
 import { Guild, ReadyPacket } from "./types.ts";
 
 type Node = {
@@ -43,6 +42,8 @@ class DiscordController {
 
     guilds: Guild[];
 
+    listeners: { ev: 'loaded', cb: () => void }[];
+
     constructor() {
         this.token = '';
         // just connect to a random ws server because i dont want to deal with (WebSocket | undefined)
@@ -51,6 +52,17 @@ class DiscordController {
         this.heartbeat_int = -1;
 
         this.guilds = [];
+        this.listeners = [];
+    }
+
+    addListener(ev: 'loaded', cb: () => void) {
+        this.listeners.push({ ev, cb });
+    }
+
+    callListeners(ev: 'loaded') {
+        for(let i=0;i<this.listeners.length;i++) {
+            if(this.listeners[i].ev == ev) this.listeners[i].cb();
+        }
     }
 
     connect(token: string) {
@@ -116,11 +128,11 @@ class DiscordController {
                         const data = p.d as ReadyPacket;
 
                         discordController.guilds = data.guilds;
+
+                        discordController.callListeners('loaded');
                     break; }
 
-                    case 'READY_SUPPLEMENTAL':
-                        console.log(p.d);
-                    break;
+                    case 'READY_SUPPLEMENTAL': break;
                 }
             break;
         }
@@ -150,11 +162,14 @@ class DiscordController {
 }
 
 class App {
-    groups: NodeGroup[];
+    uiGroups: NodeGroup[];
     size: { w: number, h: number };
     mode: Mode;
+    home: string;
 
     secrets: { token: string };
+
+    searchList: {name: string, action: (app: App) => void}[];
 
     message_string: string;
     command_string: string;
@@ -213,7 +228,8 @@ class App {
         const { columns: w, rows: h } = Deno.consoleSize();
         this.size = { w, h };
 
-        this.groups = [];
+        this.uiGroups = [];
+        this.searchList = [];
 
         this.disableDrawing = false;
 
@@ -224,11 +240,12 @@ class App {
         this.secrets = { token: '<NOT LOADED>' };
 
         this.mode = 'normal';
+        this.home = '';
 
         // load theme
 
         // generic background for everything
-        this.groups.push({
+        this.uiGroups.push({
             id: 'generic_background',
             nodes: [
                 { com: new ColorPanel({ bg: this.theme.messages_bg }), f:()=>({x: 0, y: 0, w: this.size.w, h: this.size.h}), id: 'back' }
@@ -238,7 +255,7 @@ class App {
         });
 
         // ui for servers (e.g. channels)
-        this.groups.push({
+        this.uiGroups.push({
             id: 'chat_server',
             nodes: [
                 {
@@ -287,7 +304,7 @@ class App {
         });
 
         // search modal
-        this.groups.push({
+        this.uiGroups.push({
             id: 'search',
             nodes: [
                 {
@@ -307,7 +324,7 @@ class App {
     }
 
     async start() {
-        this.setupDirectory()
+        await this.setupDirectory();
 
         this.draw();
 
@@ -318,27 +335,39 @@ class App {
         }
     }
 
-    setupDirectory() {
+    async setupDirectory() {
         if(Deno.build.os == 'windows') {
             // @TODO implement this !!
-            const home = Deno.env.get('AppData') as string;
+            this.home = Deno.env.get('AppData') as string;
 
-            if(!existsSync(home + '/.termcord')) {
-                Deno.mkdirSync(home + '/.termcord');
-                Deno.writeTextFileSync(`${home}/.termcord/secrets.json`, `{\n    "token": "<PUT YOUR TOKEN HERE>"\n}`);
-            }
-
-            this.secrets = JSON.parse(Deno.readTextFileSync(`${home}/.termcord/secrets.json`));
+            
         } else if(Deno.build.os == 'linux') {
-            const home = Deno.env.get('HOME') as string;
-
-            if(!existsSync(home + '/.termcord')) {
-                Deno.mkdirSync(home + '/.termcord');
-                Deno.writeTextFileSync(`${home}/.termcord/secrets.json`, `{\n    "token": "<PUT YOUR TOKEN HERE>"\n}`);
-            }
-
-            this.secrets = JSON.parse(Deno.readTextFileSync(`${Deno.env.get('HOME')}/.termcord/secrets.json`));
+            this.home = Deno.env.get('HOME') as string;
         }
+
+        if(!existsSync(this.home + '/.termcord')) {
+            Deno.mkdirSync(this.home + '/.termcord');
+            Deno.writeTextFileSync(`${this.home}/.termcord/secrets.json`, JSON.stringify({token: "<PUT YOUR TOKEN HERE>"}));
+            Deno.writeTextFileSync(`${this.home}/.termcord/config.json`, JSON.stringify({ theme: 'discord' }));
+        }
+
+        if(!existsSync(this.home + '/.termcord/themes')) {
+            Deno.mkdirSync(this.home + '/.termcord/themes');
+        }
+
+        // Download discord.json <3 (make this customizable)
+        Deno.writeTextFileSync(`${this.home}/.termcord/themes/discord.json`, await (await fetch('https://raw.githubusercontent.com/Nostalgia-3/termcord/main/themes/discord.json')).text());
+
+        this.secrets = JSON.parse(Deno.readTextFileSync(`${this.home}/.termcord/secrets.json`));
+        const config: Record<string, unknown> = JSON.parse(Deno.readTextFileSync(`${this.home}/.termcord/config.json`));
+
+        if(!config.theme || !existsSync(`${this.home}/.termcord/themes/${config.theme}.json`)) {
+            // Give an error in the log that the internal theme doesn't exist and change it to the default theme
+            config.theme = `discord`;
+        }
+
+        const theme = JSON.parse(Deno.readTextFileSync(`${this.home}/.termcord/themes/${config.theme}.json`));
+        this.theme = theme;
     }
 
     update(app: App) {
@@ -403,7 +432,7 @@ class App {
 
         console.clear();
 
-        this.groups.sort((a,b)=>a.zIndex-b.zIndex);
+        this.uiGroups.sort((a,b)=>a.zIndex-b.zIndex);
 
         const cs = Deno.consoleSize();
         this.size = { w: cs.columns, h: cs.rows };
@@ -435,12 +464,12 @@ class App {
             case 'search':  modeText.setContent('[S]'); search.visible=true; break;
         }
 
-        for(let i=0;i<this.groups.length;i++) {
-            if(!this.groups[i].visible) continue;
+        for(let i=0;i<this.uiGroups.length;i++) {
+            if(!this.uiGroups[i].visible) continue;
 
             
-            for(let x=0;x<this.groups[i].nodes.length;x++) {
-                const comp = this.groups[i].nodes[x];
+            for(let x=0;x<this.uiGroups[i].nodes.length;x++) {
+                const comp = this.uiGroups[i].nodes[x];
 
                 const c = comp.f();
 
@@ -469,6 +498,12 @@ class App {
         console.clear();
         // this.disableDrawing = true;
 
+        discordController.addListener('loaded', () => {
+            for(const guild of discordController.getGuilds()) {
+                // put guilds in fuzzy search for (ctrl+)k menu
+            }
+        });
+
         discordController.connect(this.secrets.token);
     }
 
@@ -479,6 +514,16 @@ class App {
             case ':q': console.clear(); Deno.exit(0); break;
             case ':h': break;
 
+            case ':theme':
+                if(secs[1]) {
+                    if(existsSync(`${this.home}/.termcord/themes/${secs[1]}.json`)) {
+                        const config: Record<string, unknown> = JSON.parse(Deno.readTextFileSync(`${this.home}/.termcord/config.json`));
+                        config.theme = secs[1];
+                        Deno.writeTextFileSync(`${this.home}/.termcord/config.json`, JSON.stringify(config));
+                    }
+                }
+            break;
+
             case ':connect':
                 this.connect();
             break;
@@ -486,8 +531,8 @@ class App {
     }
 
     getGroupByID(id: string) {
-        for(let i=0;i<this.groups.length;i++) {
-            if(this.groups[i].id == id) return this.groups[i];
+        for(let i=0;i<this.uiGroups.length;i++) {
+            if(this.uiGroups[i].id == id) return this.uiGroups[i];
         }
     }
 
