@@ -2,22 +2,22 @@
     "channels_bg":        [43, 45, 49],
     "channel_sel_fg":     [249, 255, 255],
     "channel_sel_bg":     [53, 55, 60],
-
-    "command_bg":         [0, 0, 0],
-
-    "messages_bg":        [0, 0, 0],
-
-    "message_bar_bg":     [0, 0, 0],
-
+    "server_name_bg":     [46, 50, 56],
+    "command_bg":         [38, 40, 44],
+    "messages_bg":        [49, 51, 56],
+    "message_sel_fg":     [255, 255, 255],
+    "message_sel_bg":     [46, 48, 53],
+    "message_bar_fg":     [255, 255, 255],
+    "search_inp_bg":      [30, 31, 34],
+    "search_bg":          [43, 45, 49],
     "text_normal":        [255, 255, 255],
     "text_placeholder":   [127, 127, 127],
     "text_inp_bg":        [56, 58, 64],
-
     "g_black":            [0, 0, 0],
     "g_red":              [0, 0, 0],
     "g_green":            [0, 0, 0],
     "g_yellow":           [0, 0, 0],
-    "g_blue":             [0, 0, 0],
+    "g_blue":             [88, 101, 242],
     "g_magenta":          [0, 0, 0],
     "g_cyan":             [0, 0, 0],
     "g_white":            [0, 0, 0]

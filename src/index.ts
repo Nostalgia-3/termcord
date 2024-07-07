@@ -1,7 +1,11 @@
 // deno-lint-ignore-file no-unused-vars ban-unused-ignore
 
 import { ColorPanel, PlainText, ScrollableList, TermControls, Component, TextPanel } from "../src/ui.ts";
+import { existsSync } from 'https://deno.land/std@0.224.0/fs/mod.ts';
+
 import { Keypress, readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
+import * as compress from "https://deno.land/x/compress@v0.4.6/zlib/mod.ts";
+import { Guild, ReadyPacket } from "./types.ts";
 
 type Node = {
     com: Component,
@@ -19,19 +23,146 @@ type NodeGroup = {
 
 type Mode = 'normal' | 'write' | 'search' | 'command';
 
+enum DiscordPackets {
+    // Client -> Server
+    Heartbeat = 1,
+    Identify = 2,
+
+    // Server -> Client
+    User = 0,
+    InitHeartbeat = 10,
+}
+
+class DiscordController {
+    api = 'https://discord.com/api/v9';
+
+    token: string;
+    ws: WebSocket;
+
+    heartbeat_int: number;
+
+    guilds: Guild[];
+
+    constructor() {
+        this.token = '';
+        // just connect to a random ws server because i dont want to deal with (WebSocket | undefined)
+        this.ws = new WebSocket('https://echo.websocket.org/');
+
+        this.heartbeat_int = -1;
+
+        this.guilds = [];
+    }
+
+    connect(token: string) {
+        this.token = token;
+
+        this.ws = new WebSocket('wss://gateway.discord.gg/?encoding=json&v=9');
+
+        this.ws.onopen = this.onOpen;
+        this.ws.onmessage = this.onMessage;
+    }
+
+    onOpen(this: WebSocket, ev: Event) {
+        console.log(`open`);
+    }
+
+    // deno-lint-ignore no-explicit-any
+    onMessage(this: WebSocket, ev: MessageEvent<any>) {
+        const p: { t: unknown | null, s: unknown | null, op: number, d: Record<string, unknown> } = JSON.parse(ev.data);
+
+        console.log(p.op, p.t, p.s);
+
+        switch(p.op) {
+            case DiscordPackets.InitHeartbeat: {
+                const data = p.d as { heartbeat_interval: number, _trace: string[] };
+
+                discordController.heartbeat_int = setInterval((ws: WebSocket) => {
+                    ws.send(JSON.stringify({op:DiscordPackets.Heartbeat,d:3}));
+                }, data.heartbeat_interval, this);
+
+                this.send(JSON.stringify({
+                    op: DiscordPackets.Identify,
+                    d: {
+                        capabilities: 30717,
+                        client_state: { guild_versions: {} },
+                        compress: false,
+                        presence: { status: 'unknown', since: 0, activites: [], afk: false },
+                        properties: {
+                            os: "Linux",
+                            browser: "Chrome",
+                            device: "",
+                            system_locale: "en-US",
+                            browser_user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                            browser_version: "124.0.0.0",
+                            os_version: "",
+                            referrer: "https://www.google.com/",
+                            referring_domain: "www.google.com",
+                            search_engine: "google",
+                            referrer_current: "",
+                            referring_domain_current: "",
+                            release_channel: "stable",
+                            client_build_number: 307392,
+                            client_event_source: null,
+                            design_id: 0
+                        },
+                        token: discordController.token
+                    }
+                }));
+            break; }
+
+            case DiscordPackets.User:
+                switch(p.t) {
+                    case 'READY': {
+                        const data = p.d as ReadyPacket;
+
+                        discordController.guilds = data.guilds;
+                    break; }
+
+                    case 'READY_SUPPLEMENTAL':
+                        console.log(p.d);
+                    break;
+                }
+            break;
+        }
+    }
+
+    sendMessage(channel: string, content: string) {
+        fetch(`${this.api}/channels/${channel}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                content,
+                flags: 0,
+                mobile_network_type: 'unknown',
+                nonce: Math.floor(Math.random()*999999999),
+                tts: false
+            }),
+
+            headers: {
+                Authorization: this.token,
+                'Content-Type': 'application/json'
+            }
+        });
+    }
+}
+
 class App {
-    // protected components: { com: Component, x: number, y: number, w: number, h: number }[];
     groups: NodeGroup[];
     size: { w: number, h: number };
     mode: Mode;
+
+    secrets: { token: string };
 
     message_string: string;
     command_string: string;
     search_string: string;
 
+    disableDrawing: boolean;
+
     // translations for names and such
     t = {
-        name: 'Termcord'
+        name: 'Termcord',
+        p_message_text: 'Message Channel',
+        p_search_text: 'Search Here...'
     };
 
     theme = {
@@ -80,9 +211,13 @@ class App {
 
         this.groups = [];
 
+        this.disableDrawing = false;
+
         this.message_string = '';
         this.search_string  = '';
         this.command_string = '';
+
+        this.secrets = { token: '<NOT LOADED>' };
 
         this.mode = 'normal';
 
@@ -168,12 +303,29 @@ class App {
     }
 
     async start() {
+        this.setupDirectory()
+
+        this.secrets = JSON.parse(Deno.readTextFileSync(`${Deno.env.get('HOME')}/.termcord/secrets.json`));
+
         this.draw();
 
         setInterval(this.update,1000/15, this);
 
         for await(const keypress of readKeypress(Deno.stdin)) {
             this.handleKeypress(keypress);
+        }
+    }
+
+    setupDirectory() {
+        if(Deno.build.os == 'windows') {
+            // @TODO implement this !!
+        } else if(Deno.build.os == 'linux') {
+            const home = Deno.env.get('HOME') as string;
+
+            if(!existsSync(home + '/.termcord')) {
+                Deno.mkdirSync(home + '/.termcord');
+                Deno.writeTextFileSync(`${home}/.termcord/secrets.json`, `{\n    "token": "<PUT YOUR TOKEN HERE>"\n}`);
+            }
         }
     }
 
@@ -235,6 +387,8 @@ class App {
     }
 
     draw() {
+        if(this.disableDrawing) return;
+
         console.clear();
 
         this.groups.sort((a,b)=>a.zIndex-b.zIndex);
@@ -254,13 +408,13 @@ class App {
         const searchText    = this.getNodeByID(search, 'textPanel')?.com    as PlainText;
 
         if(this.message_string != '') { messageBar.setContent(' ' + this.message_string); messageBar.style.fg = [255,255,255]; }
-        else { messageBar.setContent(` Message #channel-name`); messageBar.style.fg = [128,128,128]; }
+        else { messageBar.setContent(` ${this.t.p_message_text}`); messageBar.style.fg = [128,128,128]; }
 
-        if(this.command_string != '') { commandBar.setContent('' + this.command_string); commandBar.style.fg = [255,255,255]; }
+        if(this.command_string != '') { commandBar.setContent(this.command_string); commandBar.style.fg = [255,255,255]; }
         else { commandBar.setContent(` `); commandBar.style.fg = [128,128,128]; }
 
         if(this.search_string != '') { searchText.setContent(' ' + this.search_string); searchText.style.fg = [255,255,255]; }
-        else { searchText.setContent(` Search Here...`); searchText.style.fg = [128,128,128]; }
+        else { searchText.setContent(` ${this.t.p_search_text}`); searchText.style.fg = [128,128,128]; }
 
         switch(this.mode) {
             case 'normal':  modeText.setContent('[N]'); search.visible=false; break;
@@ -290,11 +444,33 @@ class App {
         }
     }
 
+
+    /**
+     * Begin connecting to the Discord servers
+     */
+    connect() {
+        if(this.secrets.token == `<PUT YOUR TOKEN HERE>` || this.secrets.token == `<NOT LOADED>`) {
+            console.clear();
+            console.error(`You need to put your token in secrets.json!`);
+            Deno.exit(1);
+        }
+
+        console.clear();
+        // this.disableDrawing = true;
+
+        discordController.connect(this.secrets.token);
+    }
+
     parseCommand(s: string) {
         const secs = s.split(' ');
 
         switch(secs[0]) {
             case ':q': console.clear(); Deno.exit(0); break;
+            case ':h': break;
+
+            case ':connect':
+                this.connect();
+            break;
         }
     }
 
@@ -311,6 +487,7 @@ class App {
     }
 }
 
+const discordController = new DiscordController();
 const app = new App();
 
 app.start();

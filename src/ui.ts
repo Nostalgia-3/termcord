@@ -346,8 +346,6 @@ export class TextPanel implements Component {
     getContent() { return this.content; }
 
     protected calcAlignX(x: number, w: number, alignX: 'left' | 'center' | 'right') {
-        const term = Deno.consoleSize();
-
         switch(alignX) {
             case 'left': return x;
             case 'center': return Math.floor((w-this.content.length)/2+x);
