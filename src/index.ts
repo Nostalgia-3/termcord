@@ -126,6 +126,10 @@ class DiscordController {
         }
     }
 
+    getGuilds() {
+        return this.guilds;
+    }
+
     sendMessage(channel: string, content: string) {
         fetch(`${this.api}/channels/${channel}/messages`, {
             method: 'POST',
@@ -305,8 +309,6 @@ class App {
     async start() {
         this.setupDirectory()
 
-        this.secrets = JSON.parse(Deno.readTextFileSync(`${Deno.env.get('HOME')}/.termcord/secrets.json`));
-
         this.draw();
 
         setInterval(this.update,1000/15, this);
@@ -319,6 +321,14 @@ class App {
     setupDirectory() {
         if(Deno.build.os == 'windows') {
             // @TODO implement this !!
+            const home = Deno.env.get('APPDATA') as string;
+
+            if(!existsSync(home + '/.termcord')) {
+                Deno.mkdirSync(home + '/.termcord');
+                Deno.writeTextFileSync(`${home}/.termcord/secrets.json`, `{\n    "token": "<PUT YOUR TOKEN HERE>"\n}`);
+            }
+
+            this.secrets = JSON.parse(Deno.readTextFileSync(`${home}/.termcord/secrets.json`));
         } else if(Deno.build.os == 'linux') {
             const home = Deno.env.get('HOME') as string;
 
@@ -326,6 +336,8 @@ class App {
                 Deno.mkdirSync(home + '/.termcord');
                 Deno.writeTextFileSync(`${home}/.termcord/secrets.json`, `{\n    "token": "<PUT YOUR TOKEN HERE>"\n}`);
             }
+
+            this.secrets = JSON.parse(Deno.readTextFileSync(`${Deno.env.get('HOME')}/.termcord/secrets.json`));
         }
     }
 
@@ -443,7 +455,6 @@ class App {
             case 'search': { TermControls.goTo(Math.floor((this.size.w-56)/2)+1+this.search_string.length, Math.floor((this.size.h-15)/2)+2); break; }
         }
     }
-
 
     /**
      * Begin connecting to the Discord servers
