@@ -1,2 +1,3 @@
 # termcord
-A bad terminal client for Discord
+
+A bad terminal client for Discord.
