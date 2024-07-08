@@ -321,6 +321,32 @@ class App {
             visible: true,
             zIndex: 10
         });
+
+        // Debug logger
+        this.uiGroups.push({
+            id: 'debug-logger',
+            nodes: [
+                {
+                    com: new TextPanel('Debug Logger', { alignX: 'left', alignY: 'top', bg: [50, 40, 40], fg: [255, 255, 255] }),
+                    f: () => ({ x: 1, y: 1, w: this.size.w-2, h: 1 }),
+                    id: 'debug-title'
+                },
+                {
+                    com: new ScrollableList({ bg: [40, 30, 30], fg: [255, 255, 255], bg_no_item: [40, 30, 30], bg_selected: [40,30,30], fg_selected:[255,255,255], text_align: 'left' }),
+                    f: () => ({ x: 1, y: 2, w: this.size.w-2, h: this.size.h-3 }),
+                    id: 'debug'
+                }
+            ],
+            visible: false,
+            zIndex: 1000
+        });
+    }
+
+    debugLog(msg: string) {
+        const debugGroup = this.getGroupByID('debug-logger') as NodeGroup;
+        const scrollableList = this.getNodeByID(debugGroup, 'debug') as Node;
+
+        (scrollableList.com as ScrollableList).addItem(msg);
     }
 
     async start() {
@@ -356,17 +382,19 @@ class App {
         }
 
         // Download discord.json <3 (make this customizable)
-        Deno.writeTextFileSync(`${this.home}/.termcord/themes/discord.json`, await (await fetch('https://raw.githubusercontent.com/Nostalgia-3/termcord/main/themes/discord.json')).text());
+        // Deno.writeTextFileSync(`${this.home}/.termcord/themes/discord.json`, await (await fetch('https://raw.githubusercontent.com/Nostalgia-3/termcord/main/themes/discord.json')).text());
 
         this.secrets = JSON.parse(Deno.readTextFileSync(`${this.home}/.termcord/secrets.json`));
         const config: Record<string, unknown> = JSON.parse(Deno.readTextFileSync(`${this.home}/.termcord/config.json`));
 
         if(!config.theme || !existsSync(`${this.home}/.termcord/themes/${config.theme}.json`)) {
             // Give an error in the log that the internal theme doesn't exist and change it to the default theme
+            this.debugLog(`[ERR] couldn't find theme "${config.theme}" -- replacing with discord`);
             config.theme = `discord`;
         }
 
         const theme = JSON.parse(Deno.readTextFileSync(`${this.home}/.termcord/themes/${config.theme}.json`));
+        this.debugLog(`does theme "${config.theme}" exist: ${existsSync(`${this.home}/.termcord/themes/${config.theme}.json`)}`);
         this.theme = theme;
     }
 
@@ -380,6 +408,11 @@ class App {
     handleKeypress(keypress: Keypress) {
         if(keypress.ctrlKey && keypress.key == 'c') {
             Deno.exit();
+        }
+
+        if(keypress.key == 'f3') {
+            const dg = this.getGroupByID('debug-logger') as NodeGroup;
+            dg.visible = !dg.visible;            
         }
 
         switch(this.mode) {
