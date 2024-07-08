@@ -398,16 +398,20 @@ class App {
 
         if(!existsSync(this.home + '/.termcord')) {
             Deno.mkdirSync(this.home + '/.termcord');
-            Deno.writeTextFileSync(`${this.home}/.termcord/secrets.json`, JSON.stringify({token: "<PUT YOUR TOKEN HERE>"}));
-            Deno.writeTextFileSync(`${this.home}/.termcord/config.json`, JSON.stringify({ theme: 'discord' }));
         }
 
-        if(!existsSync(this.home + '/.termcord/themes')) {
+        if(!existsSync(`${this.home}/.termcord/config.json`))
+            Deno.writeTextFileSync(`${this.home}/.termcord/config.json`, JSON.stringify({ theme: 'discord' }));
+
+        if(!existsSync(`${this.home}/.termcord/secrets.json`))
+            Deno.writeTextFileSync(`${this.home}/.termcord/secrets.json`, JSON.stringify({token: "<PUT YOUR TOKEN HERE>"}));
+
+        if(!existsSync(this.home + '/.termcord/themes'))
             Deno.mkdirSync(this.home + '/.termcord/themes');
-        }
 
         // Download discord.json <3 (make this customizable)
-        // Deno.writeTextFileSync(`${this.home}/.termcord/themes/discord.json`, await (await fetch('https://raw.githubusercontent.com/Nostalgia-3/termcord/main/themes/discord.json')).text());
+        if(!existsSync(this.home+'/.termcord/themes/discord.json'))
+            Deno.writeTextFileSync(`${this.home}/.termcord/themes/discord.json`, await (await fetch('https://raw.githubusercontent.com/Nostalgia-3/termcord/main/themes/discord.json')).text());
 
         this.secrets = JSON.parse(Deno.readTextFileSync(`${this.home}/.termcord/secrets.json`));
         const config: Record<string, unknown> = JSON.parse(Deno.readTextFileSync(`${this.home}/.termcord/config.json`));
