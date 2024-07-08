@@ -3,6 +3,7 @@
 import { ColorPanel, PlainText, ScrollableList, TermControls, Component, TextPanel, clearStyleString } from "../src/ui.ts";
 import { existsSync } from 'https://deno.land/std@0.224.0/fs/mod.ts';
 
+import Fuse from 'https://deno.land/x/fuse@v6.4.0/dist/fuse.esm.min.js'
 import { Keypress, readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 import { Guild, ReadyPacket } from "./types.ts";
 
@@ -31,6 +32,12 @@ enum DiscordPackets {
     User = 0,
     InitHeartbeat = 10,
 }
+
+enum SearchMenuType {
+    Channel     = '$F_CYANC$RESET',
+    Server      = '$F_BLUES$RESET',
+    Category    = '$F_REDC$RESET'
+};
 
 function putStrIn(s: string, put: string, x: number) {
     const left = s.substring(0, x);
@@ -82,6 +89,7 @@ class DiscordController {
     callListeners(ev: 'loaded') {
         for(let i=0;i<this.listeners.length;i++) {
             if(this.listeners[i].ev == ev) this.listeners[i].cb();
+            app.debugLog(`calling ${this.listeners[i].ev}[${i}]`);
         }
     }
 
@@ -186,6 +194,7 @@ class App {
     size: { w: number, h: number };
     mode: Mode;
     home: string;
+    fuse: Fuse;
 
     static version = '0.1.0';
 
@@ -279,6 +288,8 @@ class App {
         this.mode = 'normal';
         this.home = '';
 
+        this.fuse = new Fuse(this.searchList, { keys: [ 'name' ] });
+
         // Debug logger
         this.uiGroups.push({
             id: 'debug-logger',
@@ -313,6 +324,10 @@ class App {
         } else if(channelID == ``) {
             this.writeToMessages(`$F_BLUE<SYSTEM>$RESET $F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not in a channel!`);
         }
+    }
+
+    writeSystemMessage(msg: string) {
+        this.writeToMessages(`$F_BLUE<SYSTEM>$RESET ${msg}`);
     }
 
     writeToMessages(msg: string) {
@@ -409,7 +424,7 @@ class App {
                     id: 'textPanel'
                 },
                 {
-                    com: new ScrollableList({ bg: this.theme.command_bg, bg_no_item: this.theme.command_bg, fg:[255,255,255], fg_selected:[255,255,255] }),
+                    com: new ScrollableList({ bg: this.theme.command_bg, bg_no_item: this.theme.command_bg, fg:[255,255,255], fg_selected:[0,0,0], text_align: 'left' }),
                     f: ()=>({x: Math.floor((this.size.w-56)/2)-1,y:Math.floor((this.size.h-15)/2)+1+3,w:58,h:10}),
                     id: 'searchItems'
                 }
@@ -421,7 +436,7 @@ class App {
         const chatForServer = this.getGroupByID('chat_server') as NodeGroup;
         const messages = this.getNodeByID(chatForServer, 'messages') as Node;
 
-        (messages.com as ScrollableList).addItem(`$F_BLUE<SYSTEM>$RESET $BOLD$UNDERLINEHello!$RESET Currently you are not connected. To connect, type $ITALICS:connect$RESET!`);
+        this.writeSystemMessage(`$BOLD$UNDERLINEHello!$RESET Currently you are not connected. To connect, type $ITALICS:connect$RESET!`);
 
         this.draw();
 
@@ -544,29 +559,29 @@ class App {
                 }
             break;
 
-            case 'search':
+            case 'search': {
+                let resetFuse = true;
+
                 switch(keypress.key) {
                     case 'escape': this.mode = 'normal'; this.search_string = ''; this.search_cur_x = 0; break;
                     case 'space': this.search_string = putStrIn(this.search_string, ' ', this.search_cur_x); this.search_cur_x++; break;
                     case 'backspace': this.search_string = removeChar(this.search_string, 1, this.search_cur_x); this.search_cur_x--; break;
-                    case 'return': break; // this.mode='normal'; this.search_string = '';  this.search_cur_x = 0;
-                    case 'tab':
-                        if(this.search_mode == 'typing') this.search_mode = 'viewing';
-                        else this.search_mode = 'typing';
+                    case 'return':
+                        this.mode='normal'; this.search_string = '';  this.search_cur_x = 0;
+
+                        // select thing
                     break;
 
                     case 'up':
-                        if(this.search_mode == 'viewing') {
-                            (searchList?.com as ScrollableList).goUp();
-                            this.debugLog('search index: ' + (searchList?.com as ScrollableList).getSelectedIndex().toString());
-                        }
+                        (searchList?.com as ScrollableList).goUp();
+                        this.debugLog('search index: ' + (searchList?.com as ScrollableList).getSelectedIndex().toString());
+                        resetFuse = false;
                     break;
 
                     case 'down':
-                        if(this.search_mode == 'viewing') {
-                            (searchList?.com as ScrollableList).goDown();
-                            this.debugLog('search index: ' + (searchList?.com as ScrollableList).getSelectedIndex().toString());
-                        }
+                        (searchList?.com as ScrollableList).goDown();
+                        this.debugLog('search index: ' + (searchList?.com as ScrollableList).getSelectedIndex().toString());
+                        resetFuse = false;
                     break;
 
                     case 'left': this.search_cur_x=clamp(this.search_cur_x-1,0,150); break;
@@ -577,7 +592,20 @@ class App {
                         this.search_cur_x++;
                     break;
                 }
-            break;
+
+                if(resetFuse) {
+                    const search = (searchList?.com as ScrollableList);
+    
+                    this.fuse = new Fuse(this.searchList, { keys: ['name'] });
+    
+                    search.clearItems();
+                    const results = this.fuse.search(this.search_string);
+    
+                    for(let i=0;i<results.length;i++) {
+                        search.addItem(`[${results[i].item.type}] ${results[i].item.name}`);
+                    }
+                }
+            break; }
         }
 
         this.draw();
@@ -598,7 +626,7 @@ class App {
 
         const search = this.getGroupByID('search');
         if(!search) Deno.exit(1);
-        
+
         const messageBar    = this.getNodeByID(serverChat, 'message')?.com  as TextPanel;
         const commandBar    = this.getNodeByID(serverChat, 'command')?.com  as TextPanel;
         const modeText      = this.getNodeByID(serverChat, 'mode')?.com     as PlainText;
@@ -624,7 +652,6 @@ class App {
         for(let i=0;i<this.uiGroups.length;i++) {
             if(!this.uiGroups[i].visible) continue;
 
-            
             for(let x=0;x<this.uiGroups[i].nodes.length;x++) {
                 const comp = this.uiGroups[i].nodes[x];
                 const c = comp.f();
@@ -656,22 +683,26 @@ class App {
             Deno.exit(1);
         }
 
+        this.writeSystemMessage(`Connecting to Discord...`);
+
         console.clear();
 
         discordController.addListener('loaded', () => {
+            this.writeSystemMessage(`Connected to Discord!`);
             for(const guild of discordController.getGuilds()) {
                 // put guilds in fuzzy search for (ctrl+)k menu
-                this.searchList.push({ name: guild.properties.name, type: 'server', action:(app)=>{ app.selectGuild(guild.id) } });
+                this.searchList.push({ name: guild.properties.name, type: SearchMenuType.Server, action:(app)=>{ app.selectGuild(guild.id) } });
 
                 for(const channel of guild.channels) {
                     // put channels in fuzzy search
                     this.searchList.push({
-                        name: `unknown channel`,
-                        type: 'channel',
+                        name: channel.name,
+                        type: SearchMenuType.Channel,
                         action: (app) => { app.selectChannel(guild.id, channel.id) }
                     })
                 }
             }
+            this.draw();
         });
 
         discordController.connect(this.secrets.token);
