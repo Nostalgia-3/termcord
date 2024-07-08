@@ -119,6 +119,36 @@ function formatStyleString(s: string, fg: number[], bg: number[]): string {
     return st;
 }
 
+function clearStyleString(s: string) {
+    return s
+    .replaceAll(`$F_BLACK`,     ``)
+    .replaceAll(`$F_RED`,       ``)
+    .replaceAll(`$F_GREEN`,     ``)
+    .replaceAll(`$F_YELLOW`,    ``)
+    .replaceAll(`$F_BLUE`,      ``)
+    .replaceAll(`$F_MAGENTA`,   ``)
+    .replaceAll(`$F_CYAN`,      ``)
+    .replaceAll(`$F_WHITE`,     ``)
+    .replaceAll(`$B_BLACK`,     ``)
+    .replaceAll(`$B_RED`,       ``)
+    .replaceAll(`$B_GREEN`,     ``)
+    .replaceAll(`$B_YELLOW`,    ``)
+    .replaceAll(`$B_BLUE`,      ``)
+    .replaceAll(`$B_MAGENTA`,   ``)
+    .replaceAll(`$B_CYAN`,      ``)
+    .replaceAll(`$B_WHITE`,     ``)
+    .replaceAll(`$BOLD`,        ``)
+    .replaceAll(`$ITALICS`,     ``)
+    .replaceAll(`$UNDERLINE`,   ``)
+    .replaceAll(`$STRIKE`,      ``)
+    .replaceAll(`$NO_BOLD`,     ``) // fill these out
+    .replaceAll(`$NO_ITALICS`,  ``) // fill these out
+    .replaceAll(`$NO_UNDERLINE`,``) // fill these out
+    .replaceAll(`$NO_STRIKE`,   ``) // fill these out
+    .replaceAll(`$RESET`,       ``)
+    ;
+}
+
 export abstract class Component {
     abstract draw(x: number, y: number, width: number, height: number): void;
 }
@@ -197,11 +227,11 @@ export class ScrollableList implements Component {
             let fg = [0, 0, 0];
             
             if(this.index == i) {
+                fg = this.style.fg_selected as number[];
                 bg = this.style.bg_selected as number[];
-                bg = this.style.fg_selected as number[];
             } else {
-                bg = this.style.bg as number[];
                 fg = this.style.fg as number[];
+                bg = this.style.bg as number[];
             }
 
             text += TermControls.rgb(bg, false);
@@ -234,8 +264,10 @@ export class ScrollableList implements Component {
         return `\x1b[22;23;24;29m`;
     }
 
-    protected calculatePadding(isLeftPadding: boolean, content: string, text_align: 'left' | 'center' | 'right', width: number) {
+    protected calculatePadding(isLeftPadding: boolean, c: string, text_align: 'left' | 'center' | 'right', width: number) {
         const margin = (isLeftPadding) ? this.style.marginLeft as number : this.style.marginRight as number;
+
+        const content = clearStyleString(c);
 
         switch(text_align) {
             case 'left':
@@ -389,10 +421,12 @@ export class TextPanel implements Component {
     getContent() { return this.content; }
 
     protected calcAlignX(x: number, w: number, alignX: 'left' | 'center' | 'right') {
+        const content = clearStyleString(this.content);
+        
         switch(alignX) {
             case 'left': return x;
-            case 'center': return Math.floor((w-this.content.length)/2+x);
-            case 'right': return w+x-this.content.length;
+            case 'center': return Math.floor((w-content.length)/2+x);
+            case 'right': return w+x-content.length;
         }
     }
 

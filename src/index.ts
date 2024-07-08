@@ -180,7 +180,7 @@ class App {
     // translations for names and such
     t = {
         name: 'Termcord',
-        p_message_text: 'Message Channel',
+        p_message_text: 'Message #channel',
         p_search_text: 'Search Here...'
     };
 
@@ -292,7 +292,10 @@ class App {
                     id:'background'
                 },
                 {
-                    com: new ScrollableList({ bg_no_item:this.theme.messages_bg }),
+                    com: new ScrollableList({
+                        bg_no_item:this.theme.messages_bg, bg_selected: this.theme.message_sel_bg, fg_selected: this.theme.message_sel_fg, text_align: 'left',
+                        bg: this.theme.messages_bg, fg: this.theme.text_normal, marginLeft: 1, marginRight: 0
+                    }),
                     f:()=>({x: 25, y: 1, w: this.size.w-25, h: this.size.h-1-3}),
                     id: 'messages'
                 },
@@ -349,6 +352,11 @@ class App {
             visible: true,
             zIndex: 10
         });
+
+        const chatForServer = this.getGroupByID('chat_server') as NodeGroup;
+        const messages = this.getNodeByID(chatForServer, 'messages') as Node;
+
+        (messages.com as ScrollableList).addItem(`$F_BLUE<SYSTEM>$RESET $BOLD$UNDERLINEHello!$RESET Currently you are not connected. To connect, type $ITALICS:connect$RESET!`);
 
         this.draw();
 
