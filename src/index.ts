@@ -350,8 +350,6 @@ class App {
             zIndex: 10
         });
 
-        this.debugLog(`$BOLDTest $F_REDformatString$RESET $ITALICS$UNDERLINE$STRIKEtest$RESET`);
-
         this.draw();
 
         setInterval(this.update,1000/15, this);
@@ -562,6 +560,12 @@ class App {
 
             case ':connect':
                 this.connect();
+            break;
+
+            case '': break;
+
+            default:
+                this.debugLog(`Unknown command: "${secs[0]}"`);
             break;
         }
     }
