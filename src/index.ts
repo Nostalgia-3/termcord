@@ -75,14 +75,14 @@ class DiscordController {
     }
 
     onOpen(this: WebSocket, ev: Event) {
-        console.log(`open`);
+        app.debugLog(`WebSocket opened`);
     }
 
     // deno-lint-ignore no-explicit-any
     onMessage(this: WebSocket, ev: MessageEvent<any>) {
         const p: { t: unknown | null, s: unknown | null, op: number, d: Record<string, unknown> } = JSON.parse(ev.data);
 
-        console.log(p.op, p.t, p.s);
+        app.debugLog(`Packet with op=${p.op} t=${p.t} s=${p.s}`);
 
         switch(p.op) {
             case DiscordPackets.InitHeartbeat: {
