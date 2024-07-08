@@ -84,7 +84,8 @@ export type GuildRole = {
 export type GuildChannel = {
     type: number,
     position: number,
-    flags: boolean
+    flags: boolean,
+    id: string
 }
 
 export type User = {

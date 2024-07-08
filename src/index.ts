@@ -167,9 +167,13 @@ class App {
     mode: Mode;
     home: string;
 
+    static version = '0.1.0';
+
     secrets: { token: string };
 
-    searchList: {name: string, action: (app: App) => void}[];
+    search_mode: 'typing' | 'viewing';
+
+    searchList: {name: string, type: string, action: (app: App) => void}[];
 
     message_string: string;
     command_string: string;
@@ -183,7 +187,8 @@ class App {
     t = {
         name: 'Termcord',
         p_message_text: 'Message #channel',
-        p_search_text: 'Search Here...'
+        p_search_text: 'Search Here...',
+        welcome_msg: `Termcord v${App.version}`
     };
 
     theme = {
@@ -233,6 +238,8 @@ class App {
         this.uiGroups = [];
         this.searchList = [];
 
+        this.search_mode = 'typing';
+
         this.disableDrawing = false;
 
         this.message_string = '';
@@ -264,6 +271,14 @@ class App {
             visible: false,
             zIndex: 1000
         });
+    }
+
+    selectChannel(guild: string, channel: string) {
+        this.debugLog(`Selecting channel | Guild ID = ${guild} | Channel ID = ${channel}`);
+    }
+
+    selectGuild(id: string) {
+        this.debugLog(`Selecting guild with ID ${id}`);
     }
 
     sendMessage(channelID: string, content: string) {
@@ -366,6 +381,11 @@ class App {
                     com: new TextPanel(' Search here...',{bg:this.theme.search_inp_bg,fg:[128,128,128],alignX:'left',alignY:'center',corner:'3thin',cbg:this.theme.search_bg}),
                     f: ()=>({x: Math.floor((this.size.w-56)/2), y: Math.floor((this.size.h-15)/2)+1, w: 56, h: 3}),
                     id: 'textPanel'
+                },
+                {
+                    com: new ScrollableList({ bg: this.theme.command_bg, bg_no_item: this.theme.command_bg, fg:[255,255,255], fg_selected:[255,255,255] }),
+                    f: ()=>({x: Math.floor((this.size.w-56)/2)-1,y:Math.floor((this.size.h-15)/2)+1+3,w:58,h:10}),
+                    id: 'searchItems'
                 }
             ],
             visible: true,
@@ -436,7 +456,8 @@ class App {
 
     handleKeypress(keypress: Keypress) {
         if(keypress.ctrlKey && keypress.key == 'c') {
-            Deno.exit();
+            console.clear();
+            Deno.exit(0);
         }
 
         if(keypress.key == 'f3') {
@@ -444,6 +465,10 @@ class App {
             dg.visible = !dg.visible;          
             this.draw(); 
         }
+
+        const searchModal = this.getGroupByID('search') as NodeGroup;
+        const searchText  = this.getNodeByID(searchModal, 'textInput');
+        const searchList  = this.getNodeByID(searchModal, 'searchItems');
         
         if(keypress.key?.startsWith('f') && keypress.key.length > 1) return;
 
@@ -463,6 +488,7 @@ class App {
                     case 'escape': this.mode = 'normal'; break;
                     case 'space': this.message_string+=' '; break;
                     case 'backspace': this.message_string = this.message_string.slice(0,this.message_string.length-1); break;
+                    case 'tab': this.message_string+=`    `; break;
 
                     case 'return':
                         this.sendMessage(this.currentChannel, this.message_string);
@@ -490,6 +516,24 @@ class App {
                     case 'space': this.search_string+=' '; break;
                     case 'backspace': this.search_string = this.search_string.slice(0,this.search_string.length-1); break;
                     case 'return': this.mode='normal'; this.search_string = ''; break;
+                    case 'tab':
+                        if(this.search_mode == 'typing') this.search_mode = 'viewing';
+                        else this.search_mode = 'typing';
+                    break;
+
+                    case 'up':
+                        if(this.search_mode == 'viewing') {
+                            (searchList?.com as ScrollableList).goUp();
+                        }
+                    break;
+
+                    case 'down':
+                        if(this.search_mode == 'viewing') {
+                            (searchList?.com as ScrollableList).goDown();
+                        }
+                    break;
+
+                    case 'left': case 'right': break;
 
                     default: this.search_string+=keypress.key; break;
                 }
@@ -519,7 +563,8 @@ class App {
         const commandBar    = this.getNodeByID(serverChat, 'command')?.com  as TextPanel;
         const modeText      = this.getNodeByID(serverChat, 'mode')?.com     as PlainText;
         const searchText    = this.getNodeByID(search, 'textPanel')?.com    as PlainText;
-
+        const searchList    = this.getNodeByID(search, 'searchItems')?.com  as ScrollableList;
+        
         if(this.message_string != '') { messageBar.setContent(' ' + this.message_string); messageBar.style.fg = [255,255,255]; }
         else { messageBar.setContent(` ${this.t.p_message_text}`); messageBar.style.fg = [128,128,128]; }
 
@@ -542,9 +587,7 @@ class App {
             
             for(let x=0;x<this.uiGroups[i].nodes.length;x++) {
                 const comp = this.uiGroups[i].nodes[x];
-
                 const c = comp.f();
-
                 comp.com.draw(c.x, c.y, c.w, c.h);
             }
         }
@@ -553,7 +596,13 @@ class App {
             case 'normal': TermControls.goTo(0, 0); break;
             case 'write': TermControls.goTo(27+this.message_string.length, this.size.h-2);  break;
             case 'command': TermControls.goTo(26+this.command_string.length, 0); break;
-            case 'search': { TermControls.goTo(Math.floor((this.size.w-56)/2)+1+this.search_string.length, Math.floor((this.size.h-15)/2)+2); break; }
+            case 'search': {
+                if(this.search_mode == 'typing') {
+                    TermControls.goTo(Math.floor((this.size.w-56)/2)+1+this.search_string.length, Math.floor((this.size.h-15)/2)+2);
+                } else if(this.search_mode == 'viewing') {
+                    TermControls.goTo(Math.floor((this.size.w-56)/2)-1,Math.floor((this.size.h-15)/2)+4+searchList.getSelectedIndex());
+                }
+            break; }
         }
     }
 
@@ -568,11 +617,20 @@ class App {
         }
 
         console.clear();
-        // this.disableDrawing = true;
 
         discordController.addListener('loaded', () => {
             for(const guild of discordController.getGuilds()) {
                 // put guilds in fuzzy search for (ctrl+)k menu
+                this.searchList.push({ name: guild.properties.name, type: 'server', action:(app)=>{ app.selectGuild(guild.id) } });
+
+                for(const channel of guild.channels) {
+                    // put channels in fuzzy search
+                    this.searchList.push({
+                        name: `unknown channel`,
+                        type: 'channel',
+                        action: (app) => { app.selectChannel(guild.id, channel.id) }
+                    })
+                }
             }
         });
 
@@ -584,7 +642,15 @@ class App {
 
         switch(secs[0]) {
             case ':q': console.clear(); Deno.exit(0); break;
-            case ':h': break;
+
+            case ':help':
+            case ':h':
+                this.writeToMessages(`$F_BLUE<SYSTEM>$RESET Commands:`);
+                this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:h$RESET, $F_GREEN:help$RESET      - Show this menu`);
+                this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:theme$RESET $F_YELLOW<theme>$RESET - Set theme to $F_YELLOW<theme>$RESET`);
+                this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:connect$RESET       - Connect to Discord's servers`);
+                this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:q$RESET             - Closes the app`);
+            break;
 
             case ':theme':
                 if(secs[1]) {
@@ -603,7 +669,7 @@ class App {
             case '': break;
 
             default:
-                this.debugLog(`Unknown command: "${secs[0]}"`);
+                this.writeToMessages(`$F_BLUE<SYSTEM>$RESET Unknown command: "$F_GREEN${secs[0]}$RESET"`);
             break;
         }
     }

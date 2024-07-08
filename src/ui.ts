@@ -184,6 +184,8 @@ export class ScrollableList implements Component {
         return this.items[this.index];
     }
 
+    getSelectedIndex() { return this.index; }
+
     goUp() {
         this.index--;
         
@@ -202,6 +204,11 @@ export class ScrollableList implements Component {
 
     addItem(item: string) {
         this.items.push(item);
+    }
+
+    clearItems() {
+        this.items = [];
+        this.index = 0;
     }
 
     draw(x: number, y: number, width: number, height: number) {
