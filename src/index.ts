@@ -32,6 +32,26 @@ enum DiscordPackets {
     InitHeartbeat = 10,
 }
 
+function putStrIn(s: string, put: string, x: number) {
+    const left = s.substring(0, x);
+    const right = s.substring(x);
+    
+    return left + put + right;
+}
+
+function removeChar(s: string, num: number, x: number) {
+    const left = s.substring(0, x-num);
+    const right = s.substring(x);
+
+    return left + right;
+}
+
+function clamp(num: number, min: number, max: number) {
+    if(num > max) return max;
+    if(num < min) return min;
+    return num;
+}
+
 class DiscordController {
     api = 'https://discord.com/api/v9';
 
@@ -178,6 +198,9 @@ class App {
     message_string: string;
     command_string: string;
     search_string: string;
+    
+    mes_cur_x: number;
+    search_cur_x: number;
 
     disableDrawing: boolean;
 
@@ -239,6 +262,9 @@ class App {
         this.searchList = [];
 
         this.search_mode = 'typing';
+
+        this.mes_cur_x   = 0;
+        this.search_cur_x    = 0;
 
         this.disableDrawing = false;
 
@@ -486,16 +512,24 @@ class App {
             case 'write':
                 switch(keypress.key) { 
                     case 'escape': this.mode = 'normal'; break;
-                    case 'space': this.message_string+=' '; break;
-                    case 'backspace': this.message_string = this.message_string.slice(0,this.message_string.length-1); break;
-                    case 'tab': this.message_string+=`    `; break;
+                    case 'space': this.message_string=putStrIn(this.message_string, ' ', this.mes_cur_x); this.mes_cur_x++; break;
+                    case 'backspace': this.message_string = removeChar(this.message_string, 1, this.mes_cur_x); this.mes_cur_x--; break;
+                    case 'tab': this.message_string=putStrIn(this.message_string, '    ', this.mes_cur_x); this.mes_cur_x+=4; break;
 
                     case 'return':
                         this.sendMessage(this.currentChannel, this.message_string);
                         this.message_string = '';
+                        this.mes_cur_x = 0;
                     break;
 
-                    default: this.message_string+=keypress.key; break;
+                    case 'left': this.mes_cur_x = clamp(this.mes_cur_x-1, 0, 1000); break;
+                    case 'right': this.mes_cur_x = clamp(this.mes_cur_x+1, 0, this.message_string.length); break;
+
+                    default:
+                        if(!keypress.key || keypress.key.length > 1) break;
+                        this.message_string=putStrIn(this.message_string, keypress.key as string, this.mes_cur_x);
+                        this.mes_cur_x++;
+                    break;
                 }
             break;
 
@@ -512,10 +546,10 @@ class App {
 
             case 'search':
                 switch(keypress.key) {
-                    case 'escape': this.mode = 'normal'; this.search_string = ''; break;
-                    case 'space': this.search_string+=' '; break;
-                    case 'backspace': this.search_string = this.search_string.slice(0,this.search_string.length-1); break;
-                    case 'return': this.mode='normal'; this.search_string = ''; break;
+                    case 'escape': this.mode = 'normal'; this.search_string = ''; this.search_cur_x = 0; break;
+                    case 'space': this.search_string = putStrIn(this.search_string, ' ', this.search_cur_x); this.search_cur_x++; break;
+                    case 'backspace': this.search_string = removeChar(this.search_string, 1, this.search_cur_x); this.search_cur_x--; break;
+                    case 'return': break; // this.mode='normal'; this.search_string = '';  this.search_cur_x = 0;
                     case 'tab':
                         if(this.search_mode == 'typing') this.search_mode = 'viewing';
                         else this.search_mode = 'typing';
@@ -524,18 +558,24 @@ class App {
                     case 'up':
                         if(this.search_mode == 'viewing') {
                             (searchList?.com as ScrollableList).goUp();
+                            this.debugLog('search index: ' + (searchList?.com as ScrollableList).getSelectedIndex().toString());
                         }
                     break;
 
                     case 'down':
                         if(this.search_mode == 'viewing') {
                             (searchList?.com as ScrollableList).goDown();
+                            this.debugLog('search index: ' + (searchList?.com as ScrollableList).getSelectedIndex().toString());
                         }
                     break;
 
-                    case 'left': case 'right': break;
+                    case 'left': this.search_cur_x=clamp(this.search_cur_x-1,0,150); break;
+                    case 'right': this.search_cur_x=clamp(this.search_cur_x+1,0,this.search_string.length); break;
 
-                    default: this.search_string+=keypress.key; break;
+                    default:
+                        this.search_string = putStrIn(this.search_string, keypress.key as string, this.search_cur_x);
+                        this.search_cur_x++;
+                    break;
                 }
             break;
         }
@@ -594,11 +634,11 @@ class App {
 
         switch(this.mode) {
             case 'normal': TermControls.goTo(0, 0); break;
-            case 'write': TermControls.goTo(27+this.message_string.length, this.size.h-2);  break;
+            case 'write': TermControls.goTo(27+this.mes_cur_x, this.size.h-2);  break;
             case 'command': TermControls.goTo(26+this.command_string.length, 0); break;
             case 'search': {
                 if(this.search_mode == 'typing') {
-                    TermControls.goTo(Math.floor((this.size.w-56)/2)+1+this.search_string.length, Math.floor((this.size.h-15)/2)+2);
+                    TermControls.goTo(Math.floor((this.size.w-56)/2)+1+this.search_cur_x, Math.floor((this.size.h-15)/2)+2);
                 } else if(this.search_mode == 'viewing') {
                     TermControls.goTo(Math.floor((this.size.w-56)/2)-1,Math.floor((this.size.h-15)/2)+4+searchList.getSelectedIndex());
                 }
