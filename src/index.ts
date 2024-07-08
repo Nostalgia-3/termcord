@@ -242,7 +242,35 @@ class App {
         this.mode = 'normal';
         this.home = '';
 
-        // load theme
+        // Debug logger
+        this.uiGroups.push({
+            id: 'debug-logger',
+            nodes: [
+                {
+                    com: new TextPanel('Debug Logger', { alignX: 'left', alignY: 'top', bg: [50, 40, 40], fg: [255, 255, 255] }),
+                    f: () => ({ x: 1, y: 1, w: this.size.w-2, h: 1 }),
+                    id: 'debug-title'
+                },
+                {
+                    com: new ScrollableList({ bg: [40, 30, 30], fg: [255, 255, 255], bg_no_item: [40, 30, 30], bg_selected: [40,30,30], fg_selected:[255,255,255], text_align: 'left' }),
+                    f: () => ({ x: 1, y: 2, w: this.size.w-2, h: this.size.h-3 }),
+                    id: 'debug'
+                }
+            ],
+            visible: false,
+            zIndex: 1000
+        });
+    }
+
+    debugLog(msg: string) {
+        const debugGroup = this.getGroupByID('debug-logger') as NodeGroup;
+        const scrollableList = this.getNodeByID(debugGroup, 'debug') as Node;
+
+        (scrollableList.com as ScrollableList).addItem(msg);
+    }
+
+    async start() {
+        await this.setupDirectory();
 
         // generic background for everything
         this.uiGroups.push({
@@ -322,35 +350,7 @@ class App {
             zIndex: 10
         });
 
-        // Debug logger
-        this.uiGroups.push({
-            id: 'debug-logger',
-            nodes: [
-                {
-                    com: new TextPanel('Debug Logger', { alignX: 'left', alignY: 'top', bg: [50, 40, 40], fg: [255, 255, 255] }),
-                    f: () => ({ x: 1, y: 1, w: this.size.w-2, h: 1 }),
-                    id: 'debug-title'
-                },
-                {
-                    com: new ScrollableList({ bg: [40, 30, 30], fg: [255, 255, 255], bg_no_item: [40, 30, 30], bg_selected: [40,30,30], fg_selected:[255,255,255], text_align: 'left' }),
-                    f: () => ({ x: 1, y: 2, w: this.size.w-2, h: this.size.h-3 }),
-                    id: 'debug'
-                }
-            ],
-            visible: false,
-            zIndex: 1000
-        });
-    }
-
-    debugLog(msg: string) {
-        const debugGroup = this.getGroupByID('debug-logger') as NodeGroup;
-        const scrollableList = this.getNodeByID(debugGroup, 'debug') as Node;
-
-        (scrollableList.com as ScrollableList).addItem(msg);
-    }
-
-    async start() {
-        await this.setupDirectory();
+        this.debugLog(`$BOLDTest $F_REDformatString$RESET $ITALICS$UNDERLINE$STRIKEtest$RESET`);
 
         this.draw();
 
@@ -412,8 +412,11 @@ class App {
 
         if(keypress.key == 'f3') {
             const dg = this.getGroupByID('debug-logger') as NodeGroup;
-            dg.visible = !dg.visible;            
+            dg.visible = !dg.visible;          
+            this.draw(); 
         }
+        
+        if(keypress.key?.startsWith('f') && keypress.key.length > 1) return;
 
         switch(this.mode) {
             case "normal":

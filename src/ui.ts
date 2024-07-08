@@ -82,6 +82,43 @@ export const TermControls = {
     clear: () => { return `\x1b[0m`; }
 };
 
+/**
+ * Format a format string
+ * @param s A Format String
+ * @returns A string with ansi escape codes
+ */
+function formatStyleString(s: string, fg: number[], bg: number[]): string {
+    const st = s
+        .replaceAll(`$F_BLACK`,     `\x1b[30m`)
+        .replaceAll(`$F_RED`,       `\x1b[31m`)
+        .replaceAll(`$F_GREEN`,     `\x1b[32m`)
+        .replaceAll(`$F_YELLOW`,    `\x1b[33m`)
+        .replaceAll(`$F_BLUE`,      `\x1b[34m`)
+        .replaceAll(`$F_MAGENTA`,   `\x1b[35m`)
+        .replaceAll(`$F_CYAN`,      `\x1b[36m`)
+        .replaceAll(`$F_WHITE`,     `\x1b[37m`)
+        .replaceAll(`$B_BLACK`,     `\x1b[40m`)
+        .replaceAll(`$B_RED`,       `\x1b[41m`)
+        .replaceAll(`$B_GREEN`,     `\x1b[42m`)
+        .replaceAll(`$B_YELLOW`,    `\x1b[43m`)
+        .replaceAll(`$B_BLUE`,      `\x1b[44m`)
+        .replaceAll(`$B_MAGENTA`,   `\x1b[45m`)
+        .replaceAll(`$B_CYAN`,      `\x1b[46m`)
+        .replaceAll(`$B_WHITE`,     `\x1b[47m`)
+        .replaceAll(`$BOLD`,        `\x1b[1m`)
+        .replaceAll(`$ITALICS`,     `\x1b[3m`)
+        .replaceAll(`$UNDERLINE`,   `\x1b[4m`)
+        .replaceAll(`$STRIKE`,      `\x1b[9m`)
+        .replaceAll(`$NO_BOLD`,     `\x1b[0m`) // fill these out
+        .replaceAll(`$NO_ITALICS`,  `\x1b[0m`) // fill these out
+        .replaceAll(`$NO_UNDERLINE`,`\x1b[0m`) // fill these out
+        .replaceAll(`$NO_STRIKE`,   `\x1b[0m`) // fill these out
+        .replaceAll(`$RESET`,       `\x1b[0m${TermControls.rgb(fg, true)}${TermControls.rgb(bg, false)}`)
+    ;
+
+    return st;
+}
+
 export abstract class Component {
     abstract draw(x: number, y: number, width: number, height: number): void;
 }
@@ -155,22 +192,28 @@ export class ScrollableList implements Component {
             const paddingRight = this.calculatePadding(false, content, this.style.text_align as ('left'|'center'|'right'), width);
 
             let text: string = '';
+
+            let bg = [0, 0, 0];
+            let fg = [0, 0, 0];
             
             if(this.index == i) {
-                text += TermControls.rgb(this.style.bg_selected as number[], false);
-                text += TermControls.rgb(this.style.fg_selected as number[], true);
+                bg = this.style.bg_selected as number[];
+                bg = this.style.fg_selected as number[];
             } else {
-                text += TermControls.rgb(this.style.bg as number[], false);
-                text += TermControls.rgb(this.style.fg as number[], true);
+                bg = this.style.bg as number[];
+                fg = this.style.fg as number[];
             }
 
-            text += ''.padStart(paddingLeft, ' ');  // left padding
-            text += this.parseTextStyle();          // start text style
-            text += content;                        // actual content
-            text += this.clearTextStyle();          // stop text style
-            text += ''.padStart(paddingRight, ' '); // right padding
+            text += TermControls.rgb(bg, false);
+            text += TermControls.rgb(fg, true);
 
-            text += TermControls.clear();           // remove any item styles
+            text += ''.padStart(paddingLeft, ' ');      // left padding
+            text += this.parseTextStyle();              // start text style
+            text += formatStyleString(content,fg,bg);   // actual content
+            text += this.clearTextStyle();              // stop text style
+            text += ''.padStart(paddingRight, ' ');     // right padding
+
+            text += TermControls.clear();               // remove any item styles
 
             TermControls.write(text);
         }
@@ -259,7 +302,7 @@ export class PlainText implements Component {
             TermControls.rgb(this.style.fg as number[], true) +
             TermControls.rgb(this.style.bg as number[], false) +
             this.parseTextStyle() +
-            this.content.substring(0, width) +
+            formatStyleString(this.content.substring(0, width), this.style.fg as number[], this.style.bg as number[]) +
             TermControls.clear()
         );
     }
@@ -319,7 +362,7 @@ export class TextPanel implements Component {
             TermControls.rgb(this.style.fg as number[], true) +
             TermControls.rgb(this.style.bg as number[], false) +
             this.parseTextStyle() +
-            this.content.substring(0, width) +
+            formatStyleString(this.content.substring(0, width), this.style.fg as number[], this.style.bg as number[]) +
             TermControls.clear();
 
         if(this.style.corner == '3thin') {
