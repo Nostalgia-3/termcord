@@ -87,7 +87,7 @@ export const TermControls = {
  * @param s A Format String
  * @returns A string with ansi escape codes
  */
-function formatStyleString(s: string, fg: number[], bg: number[]): string {
+export function formatStyleString(s: string, fg: number[], bg: number[]): string {
     const st = s
         .replaceAll(`$F_BLACK`,     `\x1b[30m`)
         .replaceAll(`$F_RED`,       `\x1b[31m`)
@@ -119,7 +119,7 @@ function formatStyleString(s: string, fg: number[], bg: number[]): string {
     return st;
 }
 
-function clearStyleString(s: string) {
+export function clearStyleString(s: string) {
     return s
     .replaceAll(`$F_BLACK`,     ``)
     .replaceAll(`$F_RED`,       ``)

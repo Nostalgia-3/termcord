@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-unused-vars ban-unused-ignore
 
-import { ColorPanel, PlainText, ScrollableList, TermControls, Component, TextPanel } from "../src/ui.ts";
+import { ColorPanel, PlainText, ScrollableList, TermControls, Component, TextPanel, clearStyleString } from "../src/ui.ts";
 import { existsSync } from 'https://deno.land/std@0.224.0/fs/mod.ts';
 
 import { Keypress, readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
@@ -177,6 +177,8 @@ class App {
 
     disableDrawing: boolean;
 
+    currentChannel: string;
+
     // translations for names and such
     t = {
         name: 'Termcord',
@@ -239,6 +241,8 @@ class App {
 
         this.secrets = { token: '<NOT LOADED>' };
 
+        this.currentChannel = 'NOT CONNECTED';
+
         this.mode = 'normal';
         this.home = '';
 
@@ -260,6 +264,21 @@ class App {
             visible: false,
             zIndex: 1000
         });
+    }
+
+    sendMessage(channelID: string, content: string) {
+        if(channelID == `NOT CONNECTED`) {
+            this.writeToMessages(`$F_BLUE<SYSTEM>$RESET $F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not connected!`);
+        } else if(channelID == ``) {
+            this.writeToMessages(`$F_BLUE<SYSTEM>$RESET $F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not in a channel!`);
+        }
+    }
+
+    writeToMessages(msg: string) {
+        const chatForServer = this.getGroupByID('chat_server') as NodeGroup;
+        const messages = this.getNodeByID(chatForServer, 'messages') as Node;
+
+        (messages.com as ScrollableList).addItem(msg);
     }
 
     debugLog(msg: string) {
@@ -430,6 +449,8 @@ class App {
                     case 'i': this.mode = 'write'; break;
                     case 'k': this.mode = 'search'; break;
                     case ':': this.mode = 'command'; this.command_string = ':'; break;
+
+                    default: TermControls.bell(); break;
                 }
             break;
 
@@ -438,6 +459,11 @@ class App {
                     case 'escape': this.mode = 'normal'; break;
                     case 'space': this.message_string+=' '; break;
                     case 'backspace': this.message_string = this.message_string.slice(0,this.message_string.length-1); break;
+
+                    case 'return':
+                        this.sendMessage(this.currentChannel, this.message_string);
+                        this.message_string = '';
+                    break;
 
                     default: this.message_string+=keypress.key; break;
                 }
