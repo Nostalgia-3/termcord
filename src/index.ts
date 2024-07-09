@@ -5,7 +5,7 @@ import { existsSync } from 'https://deno.land/std@0.224.0/fs/mod.ts';
 
 import Fuse from 'https://deno.land/x/fuse@v6.4.0/dist/fuse.esm.min.js'
 import { Keypress, readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
-import { Guild, ReadyPacket } from "./types.ts";
+import { Guild, GuildChannel, ReadyPacket } from "./types.ts";
 
 type Node = {
     com: Component,
@@ -214,6 +214,9 @@ class App {
     disableDrawing: boolean;
 
     currentChannel: string;
+    currentServer?: { name: string, id: string, g: Guild };
+
+    results: { item: {name:string,type:string,action:(app:App)=>void}, refIndex: unknown }[];
 
     // translations for names and such
     t = {
@@ -288,6 +291,8 @@ class App {
         this.mode = 'normal';
         this.home = '';
 
+        this.results = [];
+
         this.fuse = new Fuse(this.searchList, { keys: [ 'name' ] });
 
         // Debug logger
@@ -315,7 +320,70 @@ class App {
     }
 
     selectGuild(id: string) {
-        this.debugLog(`Selecting guild with ID ${id}`);
+        const guilds = discordController.getGuilds();
+
+        const g = guilds.find((v)=>v.id==id);
+
+        if(!g || !g.properties.name) {
+            this.writeSystemMessage(`ERROR: unknown server with ID "${id}"!`);
+            return;
+        }
+
+        this.debugLog(`Selecting guild with ID ${id} (${g.properties.name})`);
+
+        this.currentServer = {
+            name: g.properties.name,
+            id,
+            g
+        };
+
+        this.loadChannels(g);
+    }
+
+    loadChannels(g: Guild) {
+        const serverChat = this.getGroupByID('chat_server');
+        if(!serverChat) Deno.exit(1); // @TODO add error for this
+        const channels = this.getNodeByID(serverChat, 'channels') as Node;
+
+        const list = channels.com as ScrollableList;
+
+        list.clearItems();
+
+        const sortedList: { type: number, name: string, id: string, children: GuildChannel[] }[] = [];
+
+        for(const channel of g.channels) {
+            switch(channel.type) {
+                case 4: // channel category
+                    sortedList.push({ type: channel.type, name: channel.name, id: channel.id, children: [] })
+                    //list.addItem(`% ${channel.name} -- ${channel.type}`);
+                break;
+
+                default: {
+                    const el = sortedList.find((v)=>v.id==channel.parent_id);
+                    if(!el) break;
+                    el.children.push(channel);
+                break;  }
+            }
+        }
+
+        for(const s of sortedList) {
+            list.addItem(`^ ${s.name}`);
+            for(const c of s.children) {
+                switch(c.type) {
+                    case 0: { // text channel
+                        list.addItem(` # ${c.name}`);
+                    break; }
+    
+                    case 2: { // voice channel
+                        list.addItem(` @ ${c.name}`);
+                    break; }
+
+                    default:
+                        list.addItem(` ? ${c.name}`);
+                    break;
+                }
+            }
+        }
     }
 
     sendMessage(channelID: string, content: string) {
@@ -375,8 +443,15 @@ class App {
                     id: 'messages'
                 },
                 {
-                    com: new ScrollableList({ bg_no_item:this.theme.channels_bg }),
-                    f:()=>({x: 0, y: 0, w: 25, h: this.size.h}),
+                    com: new ScrollableList({
+                        fg: this.theme.text_normal,
+                        bg:this.theme.channels_bg,
+                        fg_selected: this.theme.channel_sel_bg,
+                        bg_selected: this.theme.channel_sel_fg,
+                        bg_no_item:this.theme.channels_bg,
+                        text_align: 'left'
+                    }),
+                    f:()=>({x: 0, y: 1, w: 25, h: this.size.h-1}),
                     id: 'channels'
                 },
                 {
@@ -560,27 +635,29 @@ class App {
             break;
 
             case 'search': {
+                const search = (searchList?.com as ScrollableList);
+
                 let resetFuse = true;
 
                 switch(keypress.key) {
                     case 'escape': this.mode = 'normal'; this.search_string = ''; this.search_cur_x = 0; break;
                     case 'space': this.search_string = putStrIn(this.search_string, ' ', this.search_cur_x); this.search_cur_x++; break;
                     case 'backspace': this.search_string = removeChar(this.search_string, 1, this.search_cur_x); this.search_cur_x--; break;
-                    case 'return':
-                        this.mode='normal'; this.search_string = '';  this.search_cur_x = 0;
+                    case 'return': {
+                        const selectedItem = search.getSelectedIndex();
 
-                        // select thing
-                    break;
+                        this.results[selectedItem].item.action(this);
+
+                        this.mode='normal'; this.search_string = '';  this.search_cur_x = 0;
+                    break; }
 
                     case 'up':
                         (searchList?.com as ScrollableList).goUp();
-                        this.debugLog('search index: ' + (searchList?.com as ScrollableList).getSelectedIndex().toString());
                         resetFuse = false;
                     break;
 
                     case 'down':
                         (searchList?.com as ScrollableList).goDown();
-                        this.debugLog('search index: ' + (searchList?.com as ScrollableList).getSelectedIndex().toString());
                         resetFuse = false;
                     break;
 
@@ -594,15 +671,13 @@ class App {
                 }
 
                 if(resetFuse) {
-                    const search = (searchList?.com as ScrollableList);
-    
                     this.fuse = new Fuse(this.searchList, { keys: ['name'] });
     
                     search.clearItems();
-                    const results = this.fuse.search(this.search_string);
-    
-                    for(let i=0;i<results.length;i++) {
-                        search.addItem(`[${results[i].item.type}] ${results[i].item.name}`);
+                    this.results = this.fuse.search(this.search_string);
+
+                    for(let i=0;i<this.results.length;i++) {
+                        search.addItem(`[${this.results[i].item.type}] ${this.results[i].item.name}`);
                     }
                 }
             break; }
@@ -624,9 +699,11 @@ class App {
         const serverChat = this.getGroupByID('chat_server');
         if(!serverChat) Deno.exit(1);
 
+        
         const search = this.getGroupByID('search');
         if(!search) Deno.exit(1);
-
+        
+        const serverName    = this.getNodeByID(serverChat, 'server_name')?.com as PlainText;
         const messageBar    = this.getNodeByID(serverChat, 'message')?.com  as TextPanel;
         const commandBar    = this.getNodeByID(serverChat, 'command')?.com  as TextPanel;
         const modeText      = this.getNodeByID(serverChat, 'mode')?.com     as PlainText;
@@ -641,6 +718,9 @@ class App {
 
         if(this.search_string != '') { searchText.setContent(' ' + this.search_string); searchText.style.fg = [255,255,255]; }
         else { searchText.setContent(` ${this.t.p_search_text}`); searchText.style.fg = [128,128,128]; }
+
+        if(this.currentServer && this.currentServer.name != '') { serverName.setContent(this.currentServer.name); }
+        else { serverName.setContent(` NO SERVER`); serverName.style.fg = [128,128,128]; }
 
         switch(this.mode) {
             case 'normal':  modeText.setContent('[N]'); search.visible=false; break;
