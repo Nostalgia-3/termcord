@@ -5,7 +5,7 @@ import { existsSync } from 'https://deno.land/std@0.224.0/fs/mod.ts';
 
 import Fuse from 'https://deno.land/x/fuse@v6.4.0/dist/fuse.esm.min.js'
 import { Keypress, readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
-import { Guild, GuildChannel, ReadyPacket } from "./types.ts";
+import { Guild, ReadyPacket } from "./types.ts";
 
 type Node = {
     com: Component,
@@ -21,7 +21,7 @@ type NodeGroup = {
     zIndex: number
 };
 
-type Mode = 'normal' | 'write' | 'search' | 'command';
+type Mode = 'normal' | 'write' | 'search' | 'command' | 'scroll_messages';
 
 enum DiscordPackets {
     // Client -> Server
@@ -30,7 +30,7 @@ enum DiscordPackets {
 
     // Server -> Client
     User = 0,
-    InitHeartbeat = 10,
+    InitHeartbeat = 10
 }
 
 enum SearchMenuType {
@@ -205,11 +205,12 @@ class App {
     searchList: {name: string, type: string, action: (app: App) => void}[];
 
     message_string: string;
-    command_string: string;
+    com_string: string;
     search_string: string;
     
     mes_cur_x: number;
     search_cur_x: number;
+    com_cursor_x: number;
 
     disableDrawing: boolean;
 
@@ -252,7 +253,7 @@ class App {
 
         // text in general
         text_normal:        [255, 255, 255],
-        text_placeholder:   [127, 127, 127],
+        text_placeholder:   [12, 12, 12],
         text_inp_bg:        [56, 58, 64],
 
         // generic colors
@@ -275,14 +276,15 @@ class App {
 
         this.search_mode = 'typing';
 
-        this.mes_cur_x   = 0;
-        this.search_cur_x    = 0;
+        this.mes_cur_x    = 0;
+        this.search_cur_x = 0;
+        this.com_cursor_x = 0;
 
         this.disableDrawing = false;
 
         this.message_string = '';
         this.search_string  = '';
-        this.command_string = '';
+        this.com_string = '';
 
         this.secrets = { token: '<NOT LOADED>' };
 
@@ -331,78 +333,35 @@ class App {
 
         this.debugLog(`Selecting guild with ID ${id} (${g.properties.name})`);
 
-        this.currentServer = {
-            name: g.properties.name,
-            id,
-            g
-        };
-
-        this.loadChannels(g);
+        this.currentServer = { name: g.properties.name, id, g };
     }
 
-    loadChannels(g: Guild) {
-        const serverChat = this.getGroupByID('chat_server');
-        if(!serverChat) Deno.exit(1); // @TODO add error for this
-        const channels = this.getNodeByID(serverChat, 'channels') as Node;
-
-        const list = channels.com as ScrollableList;
-
-        list.clearItems();
-
-        const sortedList: { type: number, name: string, id: string, children: GuildChannel[] }[] = [];
-
-        for(const channel of g.channels) {
-            switch(channel.type) {
-                case 4: // channel category
-                    sortedList.push({ type: channel.type, name: channel.name, id: channel.id, children: [] })
-                    //list.addItem(`% ${channel.name} -- ${channel.type}`);
-                break;
-
-                default: {
-                    const el = sortedList.find((v)=>v.id==channel.parent_id);
-                    if(!el) break;
-                    el.children.push(channel);
-                break;  }
-            }
-        }
-
-        for(const s of sortedList) {
-            list.addItem(`^ ${s.name}`);
-            for(const c of s.children) {
-                switch(c.type) {
-                    case 0: { // text channel
-                        list.addItem(` # ${c.name}`);
-                    break; }
-    
-                    case 2: { // voice channel
-                        list.addItem(` @ ${c.name}`);
-                    break; }
-
-                    default:
-                        list.addItem(` ? ${c.name}`);
-                    break;
-                }
-            }
-        }
-    }
-
-    sendMessage(channelID: string, content: string) {
+    sendMessage(channelID: string, content: string, time?: string) {
         if(channelID == `NOT CONNECTED`) {
-            this.writeToMessages(`$F_BLUE<SYSTEM>$RESET $F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not connected!`);
+            this.writeSystemMessage(`$F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not connected!`, time);
         } else if(channelID == ``) {
-            this.writeToMessages(`$F_BLUE<SYSTEM>$RESET $F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not in a channel!`);
+            this.writeSystemMessage(`$F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not in a channel!`, time);
         }
     }
 
-    writeSystemMessage(msg: string) {
-        this.writeToMessages(`$F_BLUE<SYSTEM>$RESET ${msg}`);
+    writeSystemMessage(msg: string, time?: string) {
+        this.writeToMessages(`$F_BLUE<SYSTEM>$RESET ${msg}`, time);
     }
 
-    writeToMessages(msg: string) {
+    writeToMessages(msg: string, time?: string) {
         const chatForServer = this.getGroupByID('chat_server') as NodeGroup;
         const messages = this.getNodeByID(chatForServer, 'messages') as Node;
 
-        (messages.com as ScrollableList).addItem(msg);
+        (messages.com as ScrollableList).addItem(`${ time ?? this.formatTime(new Date()) } ${msg}`);
+    }
+
+    formatTime(t: Date) {
+        const h = (t.getHours() > 12) ? t.getHours()-12 : t.getHours();
+        const m = t.getMinutes().toString().padStart(2, '0');
+        
+        const ampm = (t.getHours() >= 12) ? 'PM' : 'AM';
+
+        return `${h}:${m} ${ampm}`;
     }
 
     debugLog(msg: string) {
@@ -414,16 +373,6 @@ class App {
 
     async start() {
         await this.setupDirectory();
-
-        // generic background for everything
-        this.uiGroups.push({
-            id: 'generic_background',
-            nodes: [
-                { com: new ColorPanel({ bg: this.theme.messages_bg }), f:()=>({x: 0, y: 0, w: this.size.w, h: this.size.h}), id: 'back' }
-            ],
-            visible: true,
-            zIndex: 0
-        });
 
         // ui for servers (e.g. channels)
         this.uiGroups.push({
@@ -439,44 +388,22 @@ class App {
                         bg_no_item:this.theme.messages_bg, bg_selected: this.theme.message_sel_bg, fg_selected: this.theme.message_sel_fg, text_align: 'left',
                         bg: this.theme.messages_bg, fg: this.theme.text_normal, marginLeft: 1, marginRight: 0
                     }),
-                    f:()=>({x: 25, y: 1, w: this.size.w-25, h: this.size.h-1-3}),
+                    f:()=>({x: 0, y: 1, w: this.size.w, h: this.size.h-4}),
                     id: 'messages'
                 },
                 {
-                    com: new ScrollableList({
-                        fg: this.theme.text_normal,
-                        bg:this.theme.channels_bg,
-                        fg_selected: this.theme.channel_sel_bg,
-                        bg_selected: this.theme.channel_sel_fg,
-                        bg_no_item:this.theme.channels_bg,
-                        text_align: 'left'
-                    }),
-                    f:()=>({x: 0, y: 1, w: 25, h: this.size.h-1}),
-                    id: 'channels'
-                },
-                {
-                    com: new ColorPanel({ bg:this.theme.command_bg }),
-                    f:()=>({x: 25, y: 0, w: this.size.w-25, h: 1}),
-                    id: 'titlebar_back'
-                },
-                {
-                    com: new PlainText('Command here', { bg:this.theme.command_bg }),
-                    f:()=>({x: 25+1, y: 0, w: this.size.w-25, h: 1}),
+                    com: new TextPanel('Command here', { bg:this.theme.command_bg, alignX: 'left', alignY: 'top' }),
+                    f:()=>({x: 0, y: 0, w: this.size.w, h: 1}),
                     id: 'command'
                 },
                 {
-                    com: new PlainText(' Server Name'.padEnd(25), {bg:this.theme.server_name_bg}),
-                    f: ()=>({x: 0, y: 0, w: 25, h: 1}),
-                    id: 'server_name'
-                },
-                {
                     com: new TextPanel(' Message #channel-name', {fg:this.theme.text_placeholder,bg:this.theme.text_inp_bg,alignY:'center',corner:'3thin',cbg:this.theme.messages_bg }),
-                    f:()=>({x:26,y:this.size.h-3,w:this.size.w-26-1,h:3}),
+                    f:()=>({x:5,y:this.size.h-3,w:this.size.w-1-10,h:3}),
                     id:'message'
                 },
                 {
-                    com: new PlainText('[N]', {bg:this.theme.command_bg,fg:this.theme.g_blue}),
-                    f:()=>({x: this.size.w-5, y: 0, w: 5, h: 1,}),
+                    com: new TextPanel('', {bg:this.theme.command_bg,fg:this.theme.text_normal,alignX:'right',alignY:'top'}),
+                    f:()=>({x: this.size.w-20, y: 0, w: 20, h: 1,}),
                     id: 'mode'
                 },
             ],
@@ -490,7 +417,7 @@ class App {
             nodes: [
                 {
                     com: new ColorPanel({ bg: this.theme.search_bg }),
-                    f: ()=>({x: Math.floor((this.size.w-60)/2), y: Math.floor((this.size.h-15)/2), w: 60, h: 15,}),
+                    f: ()=>({x: Math.floor((this.size.w-60)/2), y: Math.floor((this.size.h-15)/2), w: 60, h: 15}),
                     id:'search_bg'
                 },
                 {
@@ -508,18 +435,13 @@ class App {
             zIndex: 10
         });
 
-        const chatForServer = this.getGroupByID('chat_server') as NodeGroup;
-        const messages = this.getNodeByID(chatForServer, 'messages') as Node;
-
         this.writeSystemMessage(`$BOLD$UNDERLINEHello!$RESET Currently you are not connected. To connect, type $ITALICS:connect$RESET!`);
 
         this.draw();
 
         setInterval(this.update,1000/15, this);
 
-        for await(const keypress of readKeypress(Deno.stdin)) {
-            this.handleKeypress(keypress);
-        }
+        for await(const keypress of readKeypress(Deno.stdin)) this.handleKeypress(keypress);
     }
 
     async setupDirectory() {
@@ -578,7 +500,7 @@ class App {
 
         if(keypress.key == 'f3') {
             const dg = this.getGroupByID('debug-logger') as NodeGroup;
-            dg.visible = !dg.visible;          
+            dg.visible = !dg.visible;
             this.draw(); 
         }
 
@@ -593,7 +515,7 @@ class App {
                 switch(keypress.key) {
                     case 'i': this.mode = 'write'; break;
                     case 'k': this.mode = 'search'; break;
-                    case ':': this.mode = 'command'; this.command_string = ':'; break;
+                    case ':': this.mode = 'command'; this.com_string = ':'; break;
 
                     default: TermControls.bell(); break;
                 }
@@ -603,7 +525,7 @@ class App {
                 switch(keypress.key) { 
                     case 'escape': this.mode = 'normal'; break;
                     case 'space': this.message_string=putStrIn(this.message_string, ' ', this.mes_cur_x); this.mes_cur_x++; break;
-                    case 'backspace': this.message_string = removeChar(this.message_string, 1, this.mes_cur_x); this.mes_cur_x--; break;
+                    case 'backspace': this.message_string = removeChar(this.message_string, 1, this.mes_cur_x); this.mes_cur_x=clamp(this.mes_cur_x-1,0,100); break;
                     case 'tab': this.message_string=putStrIn(this.message_string, '    ', this.mes_cur_x); this.mes_cur_x+=4; break;
 
                     case 'return':
@@ -625,12 +547,12 @@ class App {
 
             case 'command':
                 switch(keypress.key) {
-                    case 'escape': this.mode = 'normal'; this.command_string = ''; break;
-                    case 'space': this.command_string+=' '; break;
-                    case 'backspace': this.command_string = this.command_string.slice(0,this.command_string.length-1); break;
-                    case 'return': this.parseCommand(this.command_string); this.command_string = ''; this.mode = 'normal'; break;
+                    case 'escape': this.mode = 'normal'; this.com_string = ''; break;
+                    case 'space': this.com_string=putStrIn(this.com_string, ' ', this.com_cursor_x); this.com_cursor_x++; break;
+                    case 'backspace': if(this.com_string.length > 1) this.com_string = removeChar(this.com_string, 1, this.com_cursor_x); break;
+                    case 'return': this.parseCommand(this.com_string); this.com_string = ''; this.mode = 'normal'; break;
 
-                    default: this.command_string+=keypress.key; break;
+                    default: this.com_string+=keypress.key; break;
                 }
             break;
 
@@ -645,6 +567,8 @@ class App {
                     case 'backspace': this.search_string = removeChar(this.search_string, 1, this.search_cur_x); this.search_cur_x--; break;
                     case 'return': {
                         const selectedItem = search.getSelectedIndex();
+
+                        if(!this.results[selectedItem]) break;
 
                         this.results[selectedItem].item.action(this);
 
@@ -703,30 +627,38 @@ class App {
         const search = this.getGroupByID('search');
         if(!search) Deno.exit(1);
         
-        const serverName    = this.getNodeByID(serverChat, 'server_name')?.com as PlainText;
         const messageBar    = this.getNodeByID(serverChat, 'message')?.com  as TextPanel;
         const commandBar    = this.getNodeByID(serverChat, 'command')?.com  as TextPanel;
         const modeText      = this.getNodeByID(serverChat, 'mode')?.com     as PlainText;
         const searchText    = this.getNodeByID(search, 'textPanel')?.com    as PlainText;
         const searchList    = this.getNodeByID(search, 'searchItems')?.com  as ScrollableList;
+        const messages      = this.getNodeByID(serverChat, 'messages')?.com as ScrollableList;
         
         if(this.message_string != '') { messageBar.setContent(' ' + this.message_string); messageBar.style.fg = [255,255,255]; }
         else { messageBar.setContent(` ${this.t.p_message_text}`); messageBar.style.fg = [128,128,128]; }
 
-        if(this.command_string != '') { commandBar.setContent(this.command_string); commandBar.style.fg = [255,255,255]; }
+        if(this.com_string != '') { commandBar.setContent(this.com_string); commandBar.style.fg = [255,255,255]; }
         else { commandBar.setContent(` `); commandBar.style.fg = [128,128,128]; }
 
         if(this.search_string != '') { searchText.setContent(' ' + this.search_string); searchText.style.fg = [255,255,255]; }
         else { searchText.setContent(` ${this.t.p_search_text}`); searchText.style.fg = [128,128,128]; }
 
-        if(this.currentServer && this.currentServer.name != '') { serverName.setContent(this.currentServer.name); }
-        else { serverName.setContent(` NO SERVER`); serverName.style.fg = [128,128,128]; }
+        if(this.mode != 'scroll_messages') messages.setIndex(9999999);
 
         switch(this.mode) {
-            case 'normal':  modeText.setContent('[N]'); search.visible=false; break;
-            case 'write':   modeText.setContent('[W]'); search.visible=false; break;
-            case 'command': modeText.setContent('[C]'); search.visible=false; break;
-            case 'search':  modeText.setContent('[S]'); search.visible=true; break;
+            case 'normal':  modeText.setContent('$F_BLUE[N]$RESET '); search.visible=false; break;
+            case 'write':   modeText.setContent('$F_BLUE[W]$RESET '); search.visible=false; break;
+            case 'command': modeText.setContent('$F_BLUE[C]$RESET '); search.visible=false; break;
+            case 'search':  modeText.setContent('$F_BLUE[S]$RESET '); search.visible=true; break;
+        }
+
+        if(this.currentServer) { modeText.setContent(`$F_CYAN$BOLD${this.currentServer.name.substring(0, 30)}$RESET $F_GRAY┃$RESET` + modeText.getContent()); }
+        else { modeText.setContent(`$F_CYAN$BOLDNo Server$RESET $F_GRAY┃$RESET ` + modeText.getContent()); }
+
+        if(this.currentChannel != 'NOT CONNECTED' && this.currentChannel != '') {
+            modeText.setContent(`$F_GREEN$BOLD${this.currentChannel.substring(0, 30)}$RESET $F_GRAY┃$RESET ` + modeText.getContent());
+        } else {
+            modeText.setContent(`$F_GREEN$BOLDNo Channel$RESET $F_GRAY┃$RESET ` + modeText.getContent());
         }
 
         for(let i=0;i<this.uiGroups.length;i++) {
@@ -741,8 +673,8 @@ class App {
 
         switch(this.mode) {
             case 'normal': TermControls.goTo(0, 0); break;
-            case 'write': TermControls.goTo(27+this.mes_cur_x, this.size.h-2);  break;
-            case 'command': TermControls.goTo(26+this.command_string.length, 0); break;
+            case 'write': TermControls.goTo(this.mes_cur_x+6, this.size.h-2);  break;
+            case 'command': TermControls.goTo(this.com_string.length, 0); break;
             case 'search': {
                 if(this.search_mode == 'typing') {
                     TermControls.goTo(Math.floor((this.size.w-56)/2)+1+this.search_cur_x, Math.floor((this.size.h-15)/2)+2);
@@ -775,6 +707,7 @@ class App {
 
                 for(const channel of guild.channels) {
                     // put channels in fuzzy search
+                    if(channel.type == 4) continue;
                     this.searchList.push({
                         name: channel.name,
                         type: SearchMenuType.Channel,

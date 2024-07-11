@@ -97,6 +97,7 @@ export function formatStyleString(s: string, fg: number[], bg: number[]): string
         .replaceAll(`$F_MAGENTA`,   `\x1b[35m`)
         .replaceAll(`$F_CYAN`,      `\x1b[36m`)
         .replaceAll(`$F_WHITE`,     `\x1b[37m`)
+        .replaceAll(`$F_GRAY`,      `\x1b[38;2;127;127;127m`)
         .replaceAll(`$B_BLACK`,     `\x1b[40m`)
         .replaceAll(`$B_RED`,       `\x1b[41m`)
         .replaceAll(`$B_GREEN`,     `\x1b[42m`)
@@ -129,6 +130,7 @@ export function clearStyleString(s: string) {
     .replaceAll(`$F_MAGENTA`,   ``)
     .replaceAll(`$F_CYAN`,      ``)
     .replaceAll(`$F_WHITE`,     ``)
+    .replaceAll(`$F_GRAY`,      ``)
     .replaceAll(`$B_BLACK`,     ``)
     .replaceAll(`$B_RED`,       ``)
     .replaceAll(`$B_GREEN`,     ``)
@@ -185,6 +187,10 @@ export class ScrollableList implements Component {
     }
 
     getSelectedIndex() { return this.index; }
+
+    setIndex(n: number) {
+        this.index = n;
+    }
 
     goUp() {
         this.index--;
@@ -279,7 +285,7 @@ export class ScrollableList implements Component {
         switch(text_align) {
             case 'left':
                 if(isLeftPadding) { return margin; }
-                else { return Math.floor(width - (content.length + margin)); }
+                else { return Math.floor(width - (content.length + margin) - 1); }
 
             case 'center':
                 if(isLeftPadding) { return Math.floor((width-(content.length+margin))/2); }
@@ -341,7 +347,7 @@ export class PlainText implements Component {
             TermControls.rgb(this.style.fg as number[], true) +
             TermControls.rgb(this.style.bg as number[], false) +
             this.parseTextStyle() +
-            formatStyleString(this.content.substring(0, width), this.style.fg as number[], this.style.bg as number[]) +
+            formatStyleString(this.content, this.style.fg as number[], this.style.bg as number[]) +
             TermControls.clear()
         );
     }
@@ -401,7 +407,7 @@ export class TextPanel implements Component {
             TermControls.rgb(this.style.fg as number[], true) +
             TermControls.rgb(this.style.bg as number[], false) +
             this.parseTextStyle() +
-            formatStyleString(this.content.substring(0, width), this.style.fg as number[], this.style.bg as number[]) +
+            formatStyleString(this.content, this.style.fg as number[], this.style.bg as number[]) +
             TermControls.clear();
 
         if(this.style.corner == '3thin') {
