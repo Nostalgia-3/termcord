@@ -340,7 +340,7 @@ export class PlainText implements Component {
     setContent(s: string) { this.content = s; }
     getContent() { return this.content; }
 
-    draw(x: number, y: number, width: number, _height: number): void {
+    draw(x: number, y: number, _width: number, _height: number): void {
         TermControls.goTo(x, y);
 
         TermControls.write(
@@ -420,7 +420,7 @@ export class TextPanel implements Component {
         } else if(this.style.corner == '3thintop') {
             backgroundText += `${TermControls.rgb(this.style.bg as number[],true)}`;
             backgroundText += `${TermControls.rgb(this.style.cbg as number[],false)}`;
-            backgroundText += `${TermControls.goToString(x, y)}${''.padStart(width,'▄')}${TermControls.clear()}`;
+            backgroundText += `${TermControls.goToString(x, y+height+1)}${''.padStart(width,'▄')}${TermControls.clear()}`;
         } else if(this.style.corner == '3thinbottom') {
             backgroundText += `${TermControls.rgb(this.style.bg as number[],true)}`;
             backgroundText += `${TermControls.rgb(this.style.cbg as number[],false)}`;
