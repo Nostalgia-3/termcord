@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-unused-vars ban-unused-ignore
 
-import { ColorPanel, PlainText, ScrollableList, TermControls, Component, TextPanel, clearStyleString } from "../src/ui.ts";
+import { ColorPanel, PlainText, ScrollableList, TermControls, Component, TextPanel, clearStyleString, slice } from "../src/ui.ts";
 import { existsSync } from 'https://deno.land/std@0.224.0/fs/mod.ts';
 
 import Fuse from 'https://deno.land/x/fuse@v6.4.0/dist/fuse.esm.min.js'
@@ -421,6 +421,13 @@ class App {
             zIndex: 10
         });
 
+        this.uiGroups.push({
+            id: 'messages',
+            nodes: [],
+            visible: true,
+            zIndex: 0
+        })
+
         this.writeSystemMessage(`$BOLD$UNDERLINEHello!$RESET Currently you are not connected. To connect, type $ITALICS:connect$RESET!`);
 
         this.draw();
@@ -629,7 +636,7 @@ class App {
         if(this.search_string != '') { searchText.setContent(' ' + this.search_string); searchText.style.fg = [255,255,255]; }
         else { searchText.setContent(` ${this.t.p_search_text}`); searchText.style.fg = [128,128,128]; }
 
-        if(this.mode != 'scroll_messages') messages.setIndex(9999999);
+        if(this.mode != 'scroll_messages') messages.style.draw_selected = false;
 
         switch(this.mode) {
             case 'normal':  modeText.setContent('$F_BLUE[N]$RESET '); search.visible=false; break;
@@ -678,7 +685,7 @@ class App {
     }
 
     /**
-     * Begin connecting to the Discord servers
+     * Begin connecting to the Discord's servers
      */
     connect() {
         if(this.secrets.token == `<PUT YOUR TOKEN HERE>` || this.secrets.token == `<NOT LOADED>`) {
@@ -691,49 +698,48 @@ class App {
 
         console.clear();
 
-        discordController.addListener('loaded', () => {
-            this.writeSystemMessage(`Connected to Discord!`);
-            for(const guild of discordController.getGuilds()) {
-                // put guilds in fuzzy search for (ctrl+)k menu
-                this.searchList.push({ name: guild.properties.name, type: SearchMenuType.Server, action:(app)=>{ app.selectGuild(guild.id) } });
+        discordController.on({ ev: 'loaded', cb: () => {
+                this.writeSystemMessage(`Connected to Discord!`);
+                for(const guild of discordController.getGuilds()) {
+                    // put guilds in fuzzy search for (ctrl+)k menu
+                    this.searchList.push({ name: guild.properties.name, type: SearchMenuType.Server, action:(app)=>{ app.selectGuild(guild.id) } });
 
-                for (const channel of guild.channels) {
-                    // put channels in fuzzy search
-                    if(channel.type == 4) continue;
-                    this.searchList.push({
-                        name: `${channel.name} ($UNDERLINE$BOLD$F_CYAN${guild.properties.name}$RESET)`,
-                        type: SearchMenuType.Channel,
-                        action: async(app) => { await app.selectChannel(guild.id, channel.id) }
-                    });
+                    for (const channel of guild.channels) {
+                        // put channels in fuzzy search
+                        if(channel.type == 4) continue;
+                        this.searchList.push({
+                            name: `${channel.name} ($UNDERLINE$BOLD$F_CYAN${guild.properties.name}$RESET)`,
+                            type: SearchMenuType.Channel,
+                            action: async(app) => { await app.selectChannel(guild.id, channel.id) }
+                        });
+                    }
                 }
-            }
 
-            // put friends in fuzzy search
-            for(const user of discordController.getUsers()) {
-                this.searchList.push({
-                    name: `${user.global_name ?? user.username}`,
-                    type: SearchMenuType.User,
-                    action: async(app) => { await app.selectUser(user.id); }
-                })
-            }
+                // put friends in fuzzy search
+                for(const user of discordController.getUsers()) {
+                    this.searchList.push({
+                        name: `${user.global_name ?? user.username}`,
+                        type: SearchMenuType.User,
+                        action: async(app) => { await app.selectUser(user.id); }
+                    })
+                }
 
-            this.draw();
+                this.draw();
+            }
         });
 
-        discordController.addListener('message_create', (data: unknown) => {
-            const p = data as ChatMessage;
+        discordController.on({ ev: 'message_create', cb: (data) => {
+            this.debugLog(`message.id = ${data.channel_id} | this.activeChannel = ${this.activeChannel}`);
 
-            this.debugLog(`p.id = ${p.channel_id} | this.activeChannel = ${this.activeChannel}`);
-
-            if(p.channel_id == this.activeChannel) {
-                this.writeToMessages(`<${p.author.global_name}>: ${p.content}`);
+            if(data.channel_id == this.activeChannel) {
+                this.writeToMessages(`<${data.author.global_name}>: ${data.content}`);
                 this.draw();
             }
 
             // deal with adding the message to the message cache later
 
             TermControls.bell();
-        });
+        }});
 
         discordController.connect(this.secrets.token);
     }
@@ -751,6 +757,10 @@ class App {
                 this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:theme$RESET $F_YELLOW<theme>$RESET - Set theme to $F_YELLOW<theme>$RESET`);
                 this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:connect$RESET       - Connect to Discord's servers`);
                 this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:q$RESET             - Closes the app`);
+            break;
+
+            case ':test':
+                this.debugLog(slice('1234567890', 3).toString())
             break;
 
             case ':theme':
@@ -789,7 +799,9 @@ class App {
 }
 
 
-export const discordController = new DiscordController();
-export const app = new App();
+const app = new App();
+const discordController = new DiscordController((s) => {
+    app.debugLog(s);
+});
 
 app.start();

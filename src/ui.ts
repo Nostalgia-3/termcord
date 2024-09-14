@@ -15,7 +15,9 @@ export type ScrollableStyle = {
     bold?: boolean,
     italics?: boolean,
     underline?: boolean,
-    strikethrough?: boolean
+    strikethrough?: boolean,
+
+    draw_selected?: boolean
 };
 
 export type PlainTextStyle = {
@@ -110,10 +112,10 @@ export function formatStyleString(s: string, fg: number[], bg: number[]): string
         .replaceAll(`$ITALICS`,     `\x1b[3m`)
         .replaceAll(`$UNDERLINE`,   `\x1b[4m`)
         .replaceAll(`$STRIKE`,      `\x1b[9m`)
-        .replaceAll(`$NO_BOLD`,     `\x1b[0m`) // fill these out
-        .replaceAll(`$NO_ITALICS`,  `\x1b[0m`) // fill these out
-        .replaceAll(`$NO_UNDERLINE`,`\x1b[0m`) // fill these out
-        .replaceAll(`$NO_STRIKE`,   `\x1b[0m`) // fill these out
+        .replaceAll(`$NO_BOLD`,     `\x1b[22m`) // fill these out
+        .replaceAll(`$NO_ITALICS`,  `\x1b[23m`) // fill these out
+        .replaceAll(`$NO_UNDERLINE`,`\x1b[24m`) // fill these out
+        .replaceAll(`$NO_STRIKE`,   `\x1b[29m`) // fill these out
         .replaceAll(`$RESET`,       `\x1b[0m${TermControls.rgb(fg, true)}${TermControls.rgb(bg, false)}`)
     ;
 
@@ -143,12 +145,25 @@ export function clearStyleString(s: string) {
     .replaceAll(`$ITALICS`,     ``)
     .replaceAll(`$UNDERLINE`,   ``)
     .replaceAll(`$STRIKE`,      ``)
-    .replaceAll(`$NO_BOLD`,     ``) // fill these out
-    .replaceAll(`$NO_ITALICS`,  ``) // fill these out
-    .replaceAll(`$NO_UNDERLINE`,``) // fill these out
-    .replaceAll(`$NO_STRIKE`,   ``) // fill these out
+    .replaceAll(`$NO_BOLD`,     ``)
+    .replaceAll(`$NO_ITALICS`,  ``)
+    .replaceAll(`$NO_UNDERLINE`,``)
+    .replaceAll(`$NO_STRIKE`,   ``)
     .replaceAll(`$RESET`,       ``)
     ;
+}
+
+export function slice(s: string, w: number) {
+    const size = Math.ceil(s.length/w);
+    const r = Array(size);
+    let offset = 0;
+    
+    for (let i=0;i<size;i++) {
+        r[i] = s.substring(offset, w+offset);
+        offset += w;
+    }
+    
+    return r;
 }
 
 export abstract class Component {
@@ -158,6 +173,7 @@ export abstract class Component {
 export class ScrollableList implements Component {
     protected items: string[];
     protected index: number; 
+    protected scrollIndex: number;
     style: ScrollableStyle;
 
     constructor(style?: ScrollableStyle) {
@@ -175,11 +191,15 @@ export class ScrollableList implements Component {
             bold: style?.bold ?? false,
             italics: style?.italics ?? false,
             underline: style?.underline ?? false,
-            strikethrough: style?.strikethrough ?? false
+            strikethrough: style?.strikethrough ?? false,
+
+            draw_selected: style?.draw_selected ?? true
         };
 
         this.items = [];
         this.index = 0;
+
+        this.scrollIndex = 0;
     }
 
     getSelectedItem() {
@@ -195,16 +215,18 @@ export class ScrollableList implements Component {
     goUp() {
         this.index--;
         
-        if(this.index<0) {
-            this.index = this.items.length-1;
+        if(this.index < 0) {
+            if(this.scrollIndex != 0) { this.scrollIndex--; this.index++; }
+            else { this.index = this.items.length-1; this.scrollIndex = this.items.length; }
         }
     }
 
     goDown() {
         this.index++;
-
-        if(this.index>=this.items.length) {
+        
+        if((this.index+this.scrollIndex)>=this.items.length) {
             this.index = 0;
+            this.scrollIndex = 0;
         }
     }
 
@@ -215,6 +237,7 @@ export class ScrollableList implements Component {
     clearItems() {
         this.items = [];
         this.index = 0;
+        this.scrollIndex = 0;
     }
 
     draw(x: number, y: number, width: number, height: number) {
@@ -225,11 +248,17 @@ export class ScrollableList implements Component {
             backgroundText+=`${TermControls.goToString(x, y+i)}${TermControls.rgb(this.style.bg_no_item as number[], false)}${''.padStart(width)}${TermControls.clear()}`;
         }
 
+        if(this.index > height-1) {
+            this.scrollIndex++;
+        }
+
         TermControls.write(backgroundText);
 
-        for(let i=0;i<(this.items.length > height ? height : this.items.length);i++) {
+        for(let i=0;i<height;i++) {
+            if(this.items[i+this.scrollIndex] == undefined) break;
+
             TermControls.goTo(x, y+i);
-            const content = this.items[i];
+            const content = this.items[i+this.scrollIndex];
 
             const paddingLeft =  this.calculatePadding(true, content, this.style.text_align as ('left'|'center'|'right'), width);
             const paddingRight = this.calculatePadding(false, content, this.style.text_align as ('left'|'center'|'right'), width);
@@ -239,7 +268,7 @@ export class ScrollableList implements Component {
             let bg = [0, 0, 0];
             let fg = [0, 0, 0];
             
-            if(this.index == i) {
+            if(this.style.draw_selected && this.index-this.scrollIndex == i) {
                 fg = this.style.fg_selected as number[];
                 bg = this.style.bg_selected as number[];
             } else {
@@ -250,16 +279,67 @@ export class ScrollableList implements Component {
             text += TermControls.rgb(bg, false);
             text += TermControls.rgb(fg, true);
 
-            text += ''.padStart(paddingLeft, ' ');      // left padding
-            text += this.parseTextStyle();              // start text style
-            text += formatStyleString(content,fg,bg);   // actual content
-            text += this.clearTextStyle();              // stop text style
-            text += ''.padStart(paddingRight, ' ');     // right padding
+            // multi-line text
+            if(clearStyleString(content).length > width) {
+                const lines: string[] = slice(content, width);
+
+                for(const line of lines) {
+                    if(line.length == 0) break;
+                    text += ''.padStart(paddingLeft, ' ');      // left padding
+                    text += this.parseTextStyle();              // start text style
+                    text += formatStyleString(line,fg,bg);      // actual content
+                    text += this.clearTextStyle();              // stop text style
+                    text += ''.padStart(paddingRight, ' ');     // right padding
+
+                    i++;
+                    if(i>=height) break;
+                }
+            } else {
+                text += ''.padStart(paddingLeft, ' ');      // left padding
+                text += this.parseTextStyle();              // start text style
+                text += formatStyleString(content,fg,bg);   // actual content
+                text += this.clearTextStyle();              // stop text style
+                text += ''.padStart(paddingRight, ' ');     // right padding
+            }
 
             text += TermControls.clear();               // remove any item styles
 
             TermControls.write(text);
         }
+
+        // for(let i=0;i<(this.items.length > height ? height : this.items.length);i++) {
+        //     TermControls.goTo(x, y+i);
+        //     const content = this.items[i];
+
+        //     const paddingLeft =  this.calculatePadding(true, content, this.style.text_align as ('left'|'center'|'right'), width);
+        //     const paddingRight = this.calculatePadding(false, content, this.style.text_align as ('left'|'center'|'right'), width);
+
+        //     let text: string = '';
+
+        //     let bg = [0, 0, 0];
+        //     let fg = [0, 0, 0];
+            
+        //     if(this.index == i) {
+        //         fg = this.style.fg_selected as number[];
+        //         bg = this.style.bg_selected as number[];
+        //     } else {
+        //         fg = this.style.fg as number[];
+        //         bg = this.style.bg as number[];
+        //     }
+
+        //     text += TermControls.rgb(bg, false);
+        //     text += TermControls.rgb(fg, true);
+
+        //     text += ''.padStart(paddingLeft, ' ');      // left padding
+        //     text += this.parseTextStyle();              // start text style
+        //     text += formatStyleString(content,fg,bg);   // actual content
+        //     text += this.clearTextStyle();              // stop text style
+        //     text += ''.padStart(paddingRight, ' ');     // right padding
+
+        //     text += TermControls.clear();               // remove any item styles
+
+        //     TermControls.write(text);
+        // }
     }
 
     protected parseTextStyle() {

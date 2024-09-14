@@ -243,3 +243,14 @@ export type ReadyPacket = {
     analytics_token: string,
     _trace: string[]
 };
+
+export type ChannelUpdate = {
+    type: number, // 3 = group
+    recipients: User[],
+    owner_id: string,
+    name: string,
+    last_message_id: string,
+    id: string,
+    icon?: string, // <-- assuming since it's probably a content id
+    flags: number
+};

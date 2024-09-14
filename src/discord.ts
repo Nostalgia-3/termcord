@@ -1,5 +1,4 @@
-import { app, discordController } from "./index.ts";
-import { Guild, User, ReadyPacket, ChatMessage, PrivateChannel } from "./types.ts";
+import { Guild, User, ReadyPacket, ChatMessage, PrivateChannel, ChannelUpdate } from "./types.ts";
 
 enum DiscordPackets {
     // Client -> Server
@@ -10,6 +9,12 @@ enum DiscordPackets {
     User = 0,
     InitHeartbeat = 10
 }
+
+export type LoadedListener          = { ev: 'loaded',           cb: () => void };
+export type MessageCreateListener   = { ev: 'message_create',   cb: (message: ChatMessage) => void };
+export type ChannelUpdateListener   = { ev: 'channel_update',   cb: (channel_update: ChannelUpdate) => void };
+
+export type DiscordListener = LoadedListener | MessageCreateListener | ChannelUpdateListener;
 
 export class DiscordController {
     api = 'https://discord.com/api/v9';
@@ -23,14 +28,18 @@ export class DiscordController {
     users: User[];
     privChannels: PrivateChannel[];
 
-    listeners: { ev: 'loaded' | 'message_create', cb: (data?: unknown) => void }[];
+    listeners: DiscordListener[];
 
-    constructor() {
+    logHandler: (_msg: string) => void;
+
+    constructor(logHandler = (_msg: string) => {}) {
         this.token = '';
         // just connect to a random ws server because i dont want to deal with (WebSocket | undefined)
         this.ws = new WebSocket('https://echo.websocket.org/');
 
         this.heartbeat_int = -1;
+
+        this.logHandler = logHandler;
 
         this.guilds = [];
         this.privChannels = [];
@@ -38,14 +47,14 @@ export class DiscordController {
         this.listeners = [];
     }
 
-    addListener(ev: 'loaded' | 'message_create', cb: (data?: unknown) => void) {
-        this.listeners.push({ ev, cb });
+    on(listener: DiscordListener) {
+        this.listeners.push(listener);
     }
 
-    callListeners(ev: 'loaded' | 'message_create', data?: unknown) {
+    callListeners(ev: 'loaded' | 'message_create' | 'channel_update', data: unknown) {
         for(let i=0;i<this.listeners.length;i++) {
-            if(this.listeners[i].ev == ev) this.listeners[i].cb(data);
-            app.debugLog(`calling ${this.listeners[i].ev}[${i}]`);
+            if(this.listeners[i].ev == ev) this.listeners[i].cb(data as ChatMessage & ChannelUpdate);
+            this.logHandler(`calling ${this.listeners[i].ev}[${i}]`);
         }
     }
 
@@ -55,28 +64,30 @@ export class DiscordController {
         this.ws = new WebSocket('wss://gateway.discord.gg/?encoding=json&v=9');
 
         this.ws.onopen = this.onOpen;
-        this.ws.onmessage = this.onMessage;
+        this.ws.onmessage = (ev) => {
+            this.onMessage(ev);
+        };
     }
 
-    onOpen(this: WebSocket, _ev: Event) {
-        app.debugLog(`WebSocket opened`);
+    protected onOpen(this: WebSocket, _ev: Event) {
+        // app.debugLog(`WebSocket opened`);
     }
 
     // deno-lint-ignore no-explicit-any
-    onMessage(this: WebSocket, ev: MessageEvent<any>) {
+    onMessage(ev: MessageEvent<any>) {
         const p: { t: unknown | null, s: unknown | null, op: number, d: Record<string, unknown> } = JSON.parse(ev.data);
 
-        app.debugLog(`Packet with op=${p.op} t=${p.t} s=${p.s}`);
+        this.logHandler(`Packet with op=${p.op} t=${p.t} s=${p.s}`);
 
         switch(p.op) {
             case DiscordPackets.InitHeartbeat: {
                 const data = p.d as { heartbeat_interval: number, _trace: string[] };
 
-                discordController.heartbeat_int = setInterval((ws: WebSocket) => {
+                this.heartbeat_int = setInterval((ws: WebSocket) => {
                     ws.send(JSON.stringify({op:DiscordPackets.Heartbeat,d:3}));
-                }, data.heartbeat_interval, this);
+                }, data.heartbeat_interval, this.ws);
 
-                this.send(JSON.stringify({
+                this.ws.send(JSON.stringify({
                     op: DiscordPackets.Identify,
                     d: {
                         capabilities: 30717,
@@ -101,7 +112,7 @@ export class DiscordController {
                             client_event_source: null,
                             design_id: 0
                         },
-                        token: discordController.token
+                        token: this.token
                     }
                 }));
             break; }
@@ -111,24 +122,28 @@ export class DiscordController {
                     case 'READY': {
                         const data = p.d as ReadyPacket;
 
-                        discordController.guilds = data.guilds;
+                        this.guilds = data.guilds;
 
                         // add users -- making sure to clean them
-                        discordController.users = [];
+                        this.users = [];
                         for(const user of data.users) {
                             if(user.username.startsWith('deleted_user')) continue;
-                            discordController.users.push(user);
+                            this.users.push(user);
                         }
 
-                        discordController.privChannels = data.private_channels;
+                        this.privChannels = data.private_channels;
 
-                        discordController.callListeners('loaded');
+                        this.callListeners('loaded', null);
                     break; }
 
                     case 'READY_SUPPLEMENTAL': break;
 
                     case 'MESSAGE_CREATE':
-                        discordController.callListeners('message_create', p.d);
+                        this.callListeners('message_create', p.d);
+                    break;
+
+                    case 'CHANNEL_UPDATE':
+                        this.callListeners('channel_update', p.d);
                     break;
 
                     case 'MESSAGE_DELETE':
@@ -190,6 +205,20 @@ export class DiscordController {
             headers: {
                 Authorization: this.token,
                 'Content-Type': 'application/json'
+            }
+        });
+    }
+
+    setChannelName(channel: string, name: string) {
+        return fetch(`${this.api}/channels/${channel}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+                name
+            }),
+            headers: {
+                Authorization: this.token,
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
             }
         });
     }
