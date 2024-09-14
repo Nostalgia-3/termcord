@@ -1,11 +1,12 @@
 // deno-lint-ignore-file no-unused-vars ban-unused-ignore
 
-import { ColorPanel, PlainText, ScrollableList, TermControls, Component, TextPanel, clearStyleString } from "../src/ui.ts";
+import { ColorPanel, PlainText, ScrollableList, TermControls, Component, TextPanel, clearStyleString, slice } from "../src/ui.ts";
 import { existsSync } from 'https://deno.land/std@0.224.0/fs/mod.ts';
 
 import Fuse from 'https://deno.land/x/fuse@v6.4.0/dist/fuse.esm.min.js'
 import { Keypress, readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
-import { Guild, GuildChannel, ReadyPacket } from "./types.ts";
+import { ChatMessage, Guild, GuildChannel, PrivateChannel } from "./types.ts";
+import { DiscordController } from "./discord.ts";
 
 type Node = {
     com: Component,
@@ -21,22 +22,15 @@ type NodeGroup = {
     zIndex: number
 };
 
-type Mode = 'normal' | 'write' | 'search' | 'command';
+type CachedMessage = ChatMessage;
 
-enum DiscordPackets {
-    // Client -> Server
-    Heartbeat = 1,
-    Identify = 2,
-
-    // Server -> Client
-    User = 0,
-    InitHeartbeat = 10,
-}
+type Mode = 'normal' | 'write' | 'search' | 'command' | 'scroll_messages';
 
 enum SearchMenuType {
     Channel     = '$F_CYANC$RESET',
     Server      = '$F_BLUES$RESET',
-    Category    = '$F_REDC$RESET'
+    Category    = '$F_REDC$RESET',
+    User        = '$F_YELLOWU$RESET'
 };
 
 function putStrIn(s: string, put: string, x: number) {
@@ -59,136 +53,6 @@ function clamp(num: number, min: number, max: number) {
     return num;
 }
 
-class DiscordController {
-    api = 'https://discord.com/api/v9';
-
-    token: string;
-    ws: WebSocket;
-
-    heartbeat_int: number;
-
-    guilds: Guild[];
-
-    listeners: { ev: 'loaded', cb: () => void }[];
-
-    constructor() {
-        this.token = '';
-        // just connect to a random ws server because i dont want to deal with (WebSocket | undefined)
-        this.ws = new WebSocket('https://echo.websocket.org/');
-
-        this.heartbeat_int = -1;
-
-        this.guilds = [];
-        this.listeners = [];
-    }
-
-    addListener(ev: 'loaded', cb: () => void) {
-        this.listeners.push({ ev, cb });
-    }
-
-    callListeners(ev: 'loaded') {
-        for(let i=0;i<this.listeners.length;i++) {
-            if(this.listeners[i].ev == ev) this.listeners[i].cb();
-            app.debugLog(`calling ${this.listeners[i].ev}[${i}]`);
-        }
-    }
-
-    connect(token: string) {
-        this.token = token;
-
-        this.ws = new WebSocket('wss://gateway.discord.gg/?encoding=json&v=9');
-
-        this.ws.onopen = this.onOpen;
-        this.ws.onmessage = this.onMessage;
-    }
-
-    onOpen(this: WebSocket, ev: Event) {
-        app.debugLog(`WebSocket opened`);
-    }
-
-    // deno-lint-ignore no-explicit-any
-    onMessage(this: WebSocket, ev: MessageEvent<any>) {
-        const p: { t: unknown | null, s: unknown | null, op: number, d: Record<string, unknown> } = JSON.parse(ev.data);
-
-        app.debugLog(`Packet with op=${p.op} t=${p.t} s=${p.s}`);
-
-        switch(p.op) {
-            case DiscordPackets.InitHeartbeat: {
-                const data = p.d as { heartbeat_interval: number, _trace: string[] };
-
-                discordController.heartbeat_int = setInterval((ws: WebSocket) => {
-                    ws.send(JSON.stringify({op:DiscordPackets.Heartbeat,d:3}));
-                }, data.heartbeat_interval, this);
-
-                this.send(JSON.stringify({
-                    op: DiscordPackets.Identify,
-                    d: {
-                        capabilities: 30717,
-                        client_state: { guild_versions: {} },
-                        compress: false,
-                        presence: { status: 'unknown', since: 0, activites: [], afk: false },
-                        properties: {
-                            os: "Linux",
-                            browser: "Chrome",
-                            device: "",
-                            system_locale: "en-US",
-                            browser_user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                            browser_version: "124.0.0.0",
-                            os_version: "",
-                            referrer: "https://www.google.com/",
-                            referring_domain: "www.google.com",
-                            search_engine: "google",
-                            referrer_current: "",
-                            referring_domain_current: "",
-                            release_channel: "stable",
-                            client_build_number: 307392,
-                            client_event_source: null,
-                            design_id: 0
-                        },
-                        token: discordController.token
-                    }
-                }));
-            break; }
-
-            case DiscordPackets.User:
-                switch(p.t) {
-                    case 'READY': {
-                        const data = p.d as ReadyPacket;
-
-                        discordController.guilds = data.guilds;
-
-                        discordController.callListeners('loaded');
-                    break; }
-
-                    case 'READY_SUPPLEMENTAL': break;
-                }
-            break;
-        }
-    }
-
-    getGuilds() {
-        return this.guilds;
-    }
-
-    sendMessage(channel: string, content: string) {
-        fetch(`${this.api}/channels/${channel}/messages`, {
-            method: 'POST',
-            body: JSON.stringify({
-                content,
-                flags: 0,
-                mobile_network_type: 'unknown',
-                nonce: Math.floor(Math.random()*999999999),
-                tts: false
-            }),
-
-            headers: {
-                Authorization: this.token,
-                'Content-Type': 'application/json'
-            }
-        });
-    }
-}
-
 class App {
     uiGroups: NodeGroup[];
     size: { w: number, h: number };
@@ -205,23 +69,29 @@ class App {
     searchList: {name: string, type: string, action: (app: App) => void}[];
 
     message_string: string;
-    command_string: string;
+    com_string: string;
     search_string: string;
     
     mes_cur_x: number;
     search_cur_x: number;
+    com_cursor_x: number;
 
     disableDrawing: boolean;
 
-    currentChannel: string;
+    activeChannel: string;
+
+    currentChannel?: GuildChannel;
     currentServer?: { name: string, id: string, g: Guild };
+    currentDM?: PrivateChannel;
 
     results: { item: {name:string,type:string,action:(app:App)=>void}, refIndex: unknown }[];
+
+    messages: Map<string, CachedMessage[]>;
 
     // translations for names and such
     t = {
         name: 'Termcord',
-        p_message_text: 'Message #channel',
+        p_message_text: 'Message #%CHANNEL_NAME%',
         p_search_text: 'Search Here...',
         welcome_msg: `Termcord v${App.version}`
     };
@@ -252,7 +122,7 @@ class App {
 
         // text in general
         text_normal:        [255, 255, 255],
-        text_placeholder:   [127, 127, 127],
+        text_placeholder:   [12, 12, 12],
         text_inp_bg:        [56, 58, 64],
 
         // generic colors
@@ -275,21 +145,24 @@ class App {
 
         this.search_mode = 'typing';
 
-        this.mes_cur_x   = 0;
-        this.search_cur_x    = 0;
+        this.mes_cur_x    = 0;
+        this.search_cur_x = 0;
+        this.com_cursor_x = 0;
 
         this.disableDrawing = false;
 
         this.message_string = '';
         this.search_string  = '';
-        this.command_string = '';
+        this.com_string = '';
 
         this.secrets = { token: '<NOT LOADED>' };
 
-        this.currentChannel = 'NOT CONNECTED';
+        this.activeChannel = '';
 
         this.mode = 'normal';
         this.home = '';
+
+        this.messages = new Map();
 
         this.results = [];
 
@@ -315,8 +188,64 @@ class App {
         });
     }
 
-    selectChannel(guild: string, channel: string) {
-        this.debugLog(`Selecting channel | Guild ID = ${guild} | Channel ID = ${channel}`);
+    async selectChannel(guildID: string, channelID: string) {
+        const g = discordController.getGuildById(guildID);
+        if(!g) {
+            console.clear();
+            console.error(`Guild with ID "${guildID}" does not exist`);
+            Deno.exit(1);
+        }
+
+        let channel: GuildChannel|undefined;
+
+        for(let i=0;i<g.channels.length;i++) {
+            if(g.channels[i].id == channelID) {
+                channel = g.channels[i];
+                break;
+            }
+        }
+
+        if(!channel) {
+            console.clear();
+            this.debugLog(`ERROR: Channel does not exist`);
+            Deno.exit(1);
+        }
+
+        this.currentServer = { name: g.properties.name, id: guildID, g };
+        this.currentChannel = channel;
+        this.currentDM = undefined;
+
+        this.activeChannel = g.id;
+
+        const text = this.getGroupByID('chat_server') as NodeGroup;
+        const messages = (this.getNodeByID(text, 'messages') as Node).com as ScrollableList;
+        messages.clearItems();
+
+        if(this.messages.has(channelID)) {
+            const msgs = this.messages.get(channelID) as CachedMessage[];
+
+            for(const msg of msgs) {
+                this.writeToMessages(`<${msg.author.global_name}>: ${msg.content}`);
+            }
+        } else {
+            const msgs = (await discordController.fetchMessages(channelID)).reverse();
+            
+            const cachedMessages: CachedMessage[] = [];
+
+            for(let i=0;i<msgs.length;i++) {
+                cachedMessages.push(msgs[i]);
+            }
+
+            this.messages.set(channelID, cachedMessages);
+
+            for(const msg of cachedMessages) {
+                this.writeToMessages(`<${msg.author.global_name}>: ${msg.content}`, this.formatTime(new Date(msg.timestamp)));
+            }
+
+            this.draw();
+        }
+
+        this.debugLog(`Selecting channel | Guild ID = ${guildID} | Channel ID = ${channelID}`);
     }
 
     selectGuild(id: string) {
@@ -331,78 +260,94 @@ class App {
 
         this.debugLog(`Selecting guild with ID ${id} (${g.properties.name})`);
 
-        this.currentServer = {
-            name: g.properties.name,
-            id,
-            g
-        };
-
-        this.loadChannels(g);
+        this.currentServer = { name: g.properties.name, id, g };
     }
 
-    loadChannels(g: Guild) {
-        const serverChat = this.getGroupByID('chat_server');
-        if(!serverChat) Deno.exit(1); // @TODO add error for this
-        const channels = this.getNodeByID(serverChat, 'channels') as Node;
+    async selectUser(id: string) {
+        const user = discordController.getUserById(id);
 
-        const list = channels.com as ScrollableList;
+        if(!user) {
+            this.debugLog(`ERR: couldn't find user ${id}!!`);
+            return;
+        }
 
-        list.clearItems();
+        this.debugLog(`Selecting user | Global Name = ${user.global_name} | ID = ${id}`);
 
-        const sortedList: { type: number, name: string, id: string, children: GuildChannel[] }[] = [];
+        // hehehehehehhee
+        this.currentServer = undefined;
+        this.currentChannel = undefined;
 
-        for(const channel of g.channels) {
-            switch(channel.type) {
-                case 4: // channel category
-                    sortedList.push({ type: channel.type, name: channel.name, id: channel.id, children: [] })
-                    //list.addItem(`% ${channel.name} -- ${channel.type}`);
-                break;
+        const d = discordController.getDMChannelByUserId(id);
 
-                default: {
-                    const el = sortedList.find((v)=>v.id==channel.parent_id);
-                    if(!el) break;
-                    el.children.push(channel);
-                break;  }
+        if(!d) {
+            this.debugLog(`ERR: couldn't find DM channel from user ID ${id} (${user.username})`);
+            return;
+        }
+
+        this.debugLog(`d.id = ${d?.id}`);
+
+        this.currentDM = d;
+
+        this.activeChannel = d.id;
+
+        const text = this.getGroupByID('chat_server') as NodeGroup;
+        const messages = (this.getNodeByID(text, 'messages') as Node).com as ScrollableList;
+        messages.clearItems();
+
+        if(this.messages.has(d.id)) {
+            const msgs = this.messages.get(d.id) as CachedMessage[];
+
+            for(const msg of msgs) {
+                this.writeToMessages(`<${msg.author.global_name}>: ${msg.content}`);
             }
-        }
+        } else {
+            const msgs = (await discordController.fetchMessages(d.id)).reverse();
+            
+            const cachedMessages: CachedMessage[] = [];
 
-        for(const s of sortedList) {
-            list.addItem(`^ ${s.name}`);
-            for(const c of s.children) {
-                switch(c.type) {
-                    case 0: { // text channel
-                        list.addItem(` # ${c.name}`);
-                    break; }
-    
-                    case 2: { // voice channel
-                        list.addItem(` @ ${c.name}`);
-                    break; }
-
-                    default:
-                        list.addItem(` ? ${c.name}`);
-                    break;
-                }
+            for(let i=0;i<msgs.length;i++) {
+                cachedMessages.push(msgs[i]);
             }
+
+            this.messages.set(d.id, cachedMessages);
+
+            for(const msg of cachedMessages) {
+                this.writeToMessages(`<${msg.author.global_name}>: ${msg.content}`, this.formatTime(new Date(msg.timestamp)));
+            }
+
+            this.draw();
         }
     }
 
-    sendMessage(channelID: string, content: string) {
-        if(channelID == `NOT CONNECTED`) {
-            this.writeToMessages(`$F_BLUE<SYSTEM>$RESET $F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not connected!`);
-        } else if(channelID == ``) {
-            this.writeToMessages(`$F_BLUE<SYSTEM>$RESET $F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not in a channel!`);
+    sendMessage(content: string, channel?: string, time?: string) {
+        if(channel) {
+            discordController.sendMessage(channel, content);
+        } else if(this.currentDM) {
+            this.debugLog(`sending DM message to ${this.currentDM.id}`);
+            discordController.sendMessage(this.currentDM.id, content);
+        } else {
+            this.writeSystemMessage(`$F_REDError:$RESET Cannot send $F_WHITE"${clearStyleString(content)}"$RESET while not connected to a channel!`, time);
         }
     }
 
-    writeSystemMessage(msg: string) {
-        this.writeToMessages(`$F_BLUE<SYSTEM>$RESET ${msg}`);
+    writeSystemMessage(msg: string, time?: string) {
+        this.writeToMessages(`$F_BLUE<SYSTEM>$RESET ${msg}`, time);
     }
 
-    writeToMessages(msg: string) {
+    writeToMessages(msg: string, time?: string) {
         const chatForServer = this.getGroupByID('chat_server') as NodeGroup;
         const messages = this.getNodeByID(chatForServer, 'messages') as Node;
 
-        (messages.com as ScrollableList).addItem(msg);
+        (messages.com as ScrollableList).addItem(`${ time ?? this.formatTime(new Date()) } ${msg}`);
+    }
+
+    formatTime(t: Date) {
+        const h = (t.getHours() > 12) ? t.getHours()-12 : t.getHours();
+        const m = t.getMinutes().toString().padStart(2, '0');
+        
+        const ampm = (t.getHours() >= 12) ? 'PM' : 'AM';
+
+        return `$ITALICS${t.getDate().toString().padStart(2,'0')}/${t.getMonth()}/${t.getFullYear()}$RESET ${h}:${m} ${ampm}`;
     }
 
     debugLog(msg: string) {
@@ -414,16 +359,6 @@ class App {
 
     async start() {
         await this.setupDirectory();
-
-        // generic background for everything
-        this.uiGroups.push({
-            id: 'generic_background',
-            nodes: [
-                { com: new ColorPanel({ bg: this.theme.messages_bg }), f:()=>({x: 0, y: 0, w: this.size.w, h: this.size.h}), id: 'back' }
-            ],
-            visible: true,
-            zIndex: 0
-        });
 
         // ui for servers (e.g. channels)
         this.uiGroups.push({
@@ -439,44 +374,22 @@ class App {
                         bg_no_item:this.theme.messages_bg, bg_selected: this.theme.message_sel_bg, fg_selected: this.theme.message_sel_fg, text_align: 'left',
                         bg: this.theme.messages_bg, fg: this.theme.text_normal, marginLeft: 1, marginRight: 0
                     }),
-                    f:()=>({x: 25, y: 1, w: this.size.w-25, h: this.size.h-1-3}),
+                    f:()=>({x: 0, y: 1, w: this.size.w, h: this.size.h-4}),
                     id: 'messages'
                 },
                 {
-                    com: new ScrollableList({
-                        fg: this.theme.text_normal,
-                        bg:this.theme.channels_bg,
-                        fg_selected: this.theme.channel_sel_bg,
-                        bg_selected: this.theme.channel_sel_fg,
-                        bg_no_item:this.theme.channels_bg,
-                        text_align: 'left'
-                    }),
-                    f:()=>({x: 0, y: 1, w: 25, h: this.size.h-1}),
-                    id: 'channels'
-                },
-                {
-                    com: new ColorPanel({ bg:this.theme.command_bg }),
-                    f:()=>({x: 25, y: 0, w: this.size.w-25, h: 1}),
-                    id: 'titlebar_back'
-                },
-                {
-                    com: new PlainText('Command here', { bg:this.theme.command_bg }),
-                    f:()=>({x: 25+1, y: 0, w: this.size.w-25, h: 1}),
+                    com: new TextPanel('Command here', { bg:this.theme.command_bg, alignX: 'left', alignY: 'top' }),
+                    f:()=>({x: 0, y: 0, w: this.size.w, h: 1}),
                     id: 'command'
                 },
                 {
-                    com: new PlainText(' Server Name'.padEnd(25), {bg:this.theme.server_name_bg}),
-                    f: ()=>({x: 0, y: 0, w: 25, h: 1}),
-                    id: 'server_name'
-                },
-                {
                     com: new TextPanel(' Message #channel-name', {fg:this.theme.text_placeholder,bg:this.theme.text_inp_bg,alignY:'center',corner:'3thin',cbg:this.theme.messages_bg }),
-                    f:()=>({x:26,y:this.size.h-3,w:this.size.w-26-1,h:3}),
+                    f:()=>({x:5,y:this.size.h-3,w:this.size.w-1-10,h:3}),
                     id:'message'
                 },
                 {
-                    com: new PlainText('[N]', {bg:this.theme.command_bg,fg:this.theme.g_blue}),
-                    f:()=>({x: this.size.w-5, y: 0, w: 5, h: 1,}),
+                    com: new TextPanel('', {bg:this.theme.command_bg,fg:this.theme.text_normal,alignX:'right',alignY:'top'}),
+                    f:()=>({x: this.size.w-20, y: 0, w: 20, h: 1,}),
                     id: 'mode'
                 },
             ],
@@ -490,7 +403,7 @@ class App {
             nodes: [
                 {
                     com: new ColorPanel({ bg: this.theme.search_bg }),
-                    f: ()=>({x: Math.floor((this.size.w-60)/2), y: Math.floor((this.size.h-15)/2), w: 60, h: 15,}),
+                    f: ()=>({x: Math.floor((this.size.w-60)/2), y: Math.floor((this.size.h-15)/2), w: 60, h: 15}),
                     id:'search_bg'
                 },
                 {
@@ -508,8 +421,12 @@ class App {
             zIndex: 10
         });
 
-        const chatForServer = this.getGroupByID('chat_server') as NodeGroup;
-        const messages = this.getNodeByID(chatForServer, 'messages') as Node;
+        this.uiGroups.push({
+            id: 'messages',
+            nodes: [],
+            visible: true,
+            zIndex: 0
+        })
 
         this.writeSystemMessage(`$BOLD$UNDERLINEHello!$RESET Currently you are not connected. To connect, type $ITALICS:connect$RESET!`);
 
@@ -517,9 +434,7 @@ class App {
 
         setInterval(this.update,1000/15, this);
 
-        for await(const keypress of readKeypress(Deno.stdin)) {
-            this.handleKeypress(keypress);
-        }
+        for await(const keypress of readKeypress(Deno.stdin)) this.handleKeypress(keypress);
     }
 
     async setupDirectory() {
@@ -578,7 +493,7 @@ class App {
 
         if(keypress.key == 'f3') {
             const dg = this.getGroupByID('debug-logger') as NodeGroup;
-            dg.visible = !dg.visible;          
+            dg.visible = !dg.visible;
             this.draw(); 
         }
 
@@ -593,7 +508,7 @@ class App {
                 switch(keypress.key) {
                     case 'i': this.mode = 'write'; break;
                     case 'k': this.mode = 'search'; break;
-                    case ':': this.mode = 'command'; this.command_string = ':'; break;
+                    case ':': this.mode = 'command'; this.com_string = ':'; this.com_cursor_x++; break;
 
                     default: TermControls.bell(); break;
                 }
@@ -603,11 +518,11 @@ class App {
                 switch(keypress.key) { 
                     case 'escape': this.mode = 'normal'; break;
                     case 'space': this.message_string=putStrIn(this.message_string, ' ', this.mes_cur_x); this.mes_cur_x++; break;
-                    case 'backspace': this.message_string = removeChar(this.message_string, 1, this.mes_cur_x); this.mes_cur_x--; break;
+                    case 'backspace': this.message_string = removeChar(this.message_string, 1, this.mes_cur_x); this.mes_cur_x=clamp(this.mes_cur_x-1,0,100); break;
                     case 'tab': this.message_string=putStrIn(this.message_string, '    ', this.mes_cur_x); this.mes_cur_x+=4; break;
 
                     case 'return':
-                        this.sendMessage(this.currentChannel, this.message_string);
+                        this.sendMessage(this.message_string, this.currentChannel?.id);
                         this.message_string = '';
                         this.mes_cur_x = 0;
                     break;
@@ -625,12 +540,12 @@ class App {
 
             case 'command':
                 switch(keypress.key) {
-                    case 'escape': this.mode = 'normal'; this.command_string = ''; break;
-                    case 'space': this.command_string+=' '; break;
-                    case 'backspace': this.command_string = this.command_string.slice(0,this.command_string.length-1); break;
-                    case 'return': this.parseCommand(this.command_string); this.command_string = ''; this.mode = 'normal'; break;
+                    case 'escape': this.mode = 'normal'; this.com_string = ''; this.com_cursor_x=0; break;
+                    case 'space': this.com_string=putStrIn(this.com_string, ' ', this.com_cursor_x); this.com_cursor_x++; break;
+                    case 'backspace': if(this.com_cursor_x > 1) this.com_string = removeChar(this.com_string, 1, this.com_cursor_x--); break;
+                    case 'return': this.parseCommand(this.com_string); this.com_string = ''; this.mode = 'normal'; this.com_cursor_x=0; break;
 
-                    default: this.command_string+=keypress.key; break;
+                    default: this.com_string+=keypress.key; this.com_cursor_x++; break;
                 }
             break;
 
@@ -645,6 +560,8 @@ class App {
                     case 'backspace': this.search_string = removeChar(this.search_string, 1, this.search_cur_x); this.search_cur_x--; break;
                     case 'return': {
                         const selectedItem = search.getSelectedIndex();
+
+                        if(!this.results[selectedItem]) break;
 
                         this.results[selectedItem].item.action(this);
 
@@ -703,30 +620,44 @@ class App {
         const search = this.getGroupByID('search');
         if(!search) Deno.exit(1);
         
-        const serverName    = this.getNodeByID(serverChat, 'server_name')?.com as PlainText;
         const messageBar    = this.getNodeByID(serverChat, 'message')?.com  as TextPanel;
         const commandBar    = this.getNodeByID(serverChat, 'command')?.com  as TextPanel;
         const modeText      = this.getNodeByID(serverChat, 'mode')?.com     as PlainText;
         const searchText    = this.getNodeByID(search, 'textPanel')?.com    as PlainText;
         const searchList    = this.getNodeByID(search, 'searchItems')?.com  as ScrollableList;
+        const messages      = this.getNodeByID(serverChat, 'messages')?.com as ScrollableList;
         
         if(this.message_string != '') { messageBar.setContent(' ' + this.message_string); messageBar.style.fg = [255,255,255]; }
-        else { messageBar.setContent(` ${this.t.p_message_text}`); messageBar.style.fg = [128,128,128]; }
+        else { messageBar.setContent(` ${this.t.p_message_text.replaceAll('%CHANNEL_NAME%', this.currentChannel?.name ?? 'unknown-channel')}`); messageBar.style.fg = [128,128,128]; }
 
-        if(this.command_string != '') { commandBar.setContent(this.command_string); commandBar.style.fg = [255,255,255]; }
+        if(this.com_string != '') { commandBar.setContent(this.com_string); commandBar.style.fg = [255,255,255]; }
         else { commandBar.setContent(` `); commandBar.style.fg = [128,128,128]; }
 
         if(this.search_string != '') { searchText.setContent(' ' + this.search_string); searchText.style.fg = [255,255,255]; }
         else { searchText.setContent(` ${this.t.p_search_text}`); searchText.style.fg = [128,128,128]; }
 
-        if(this.currentServer && this.currentServer.name != '') { serverName.setContent(this.currentServer.name); }
-        else { serverName.setContent(` NO SERVER`); serverName.style.fg = [128,128,128]; }
+        if(this.mode != 'scroll_messages') messages.style.draw_selected = false;
 
         switch(this.mode) {
-            case 'normal':  modeText.setContent('[N]'); search.visible=false; break;
-            case 'write':   modeText.setContent('[W]'); search.visible=false; break;
-            case 'command': modeText.setContent('[C]'); search.visible=false; break;
-            case 'search':  modeText.setContent('[S]'); search.visible=true; break;
+            case 'normal':  modeText.setContent('$F_BLUE[N]$RESET '); search.visible=false; break;
+            case 'write':   modeText.setContent('$F_BLUE[W]$RESET '); search.visible=false; break;
+            case 'command': modeText.setContent('$F_BLUE[C]$RESET '); search.visible=false; break;
+            case 'search':  modeText.setContent('$F_BLUE[S]$RESET '); search.visible=true; break;
+        }
+
+        if(this.currentServer) { modeText.setContent(`$F_CYAN$BOLD${this.currentServer.name.substring(0, 30)}$RESET $F_GRAY┃$RESET` + modeText.getContent()); }
+        else { modeText.setContent(`$F_CYAN$BOLDNo Server$RESET $F_GRAY┃$RESET ` + modeText.getContent()); }
+
+        if(!this.currentChannel) {
+            modeText.setContent(`$F_GREEN$BOLDNo Channel$RESET $F_GRAY┃$RESET ${modeText.getContent()}`);
+        } else {
+            modeText.setContent(`$F_GREEN$BOLD${this.currentChannel.name}$RESET $F_GRAY┃$RESET ${modeText.getContent()}`);
+        }
+
+        if(!this.currentDM) {
+            modeText.setContent(`$F_YELLOW$BOLDNo DM$RESET $F_GRAY┃$RESET ${modeText.getContent()}`);
+        } else {
+            modeText.setContent(`$F_YELLOW$BOLD${this.currentDM.id}$RESET $F_GRAY┃$RESET ${modeText.getContent()}`);
         }
 
         for(let i=0;i<this.uiGroups.length;i++) {
@@ -741,8 +672,8 @@ class App {
 
         switch(this.mode) {
             case 'normal': TermControls.goTo(0, 0); break;
-            case 'write': TermControls.goTo(27+this.mes_cur_x, this.size.h-2);  break;
-            case 'command': TermControls.goTo(26+this.command_string.length, 0); break;
+            case 'write': TermControls.goTo(this.mes_cur_x+6, this.size.h-2);  break;
+            case 'command': TermControls.goTo(this.com_cursor_x, 0); break;
             case 'search': {
                 if(this.search_mode == 'typing') {
                     TermControls.goTo(Math.floor((this.size.w-56)/2)+1+this.search_cur_x, Math.floor((this.size.h-15)/2)+2);
@@ -754,7 +685,7 @@ class App {
     }
 
     /**
-     * Begin connecting to the Discord servers
+     * Begin connecting to the Discord's servers
      */
     connect() {
         if(this.secrets.token == `<PUT YOUR TOKEN HERE>` || this.secrets.token == `<NOT LOADED>`) {
@@ -767,23 +698,48 @@ class App {
 
         console.clear();
 
-        discordController.addListener('loaded', () => {
-            this.writeSystemMessage(`Connected to Discord!`);
-            for(const guild of discordController.getGuilds()) {
-                // put guilds in fuzzy search for (ctrl+)k menu
-                this.searchList.push({ name: guild.properties.name, type: SearchMenuType.Server, action:(app)=>{ app.selectGuild(guild.id) } });
+        discordController.on({ ev: 'loaded', cb: () => {
+                this.writeSystemMessage(`Connected to Discord!`);
+                for(const guild of discordController.getGuilds()) {
+                    // put guilds in fuzzy search for (ctrl+)k menu
+                    this.searchList.push({ name: guild.properties.name, type: SearchMenuType.Server, action:(app)=>{ app.selectGuild(guild.id) } });
 
-                for(const channel of guild.channels) {
-                    // put channels in fuzzy search
+                    for (const channel of guild.channels) {
+                        // put channels in fuzzy search
+                        if(channel.type == 4) continue;
+                        this.searchList.push({
+                            name: `${channel.name} ($UNDERLINE$BOLD$F_CYAN${guild.properties.name}$RESET)`,
+                            type: SearchMenuType.Channel,
+                            action: async(app) => { await app.selectChannel(guild.id, channel.id) }
+                        });
+                    }
+                }
+
+                // put friends in fuzzy search
+                for(const user of discordController.getUsers()) {
                     this.searchList.push({
-                        name: channel.name,
-                        type: SearchMenuType.Channel,
-                        action: (app) => { app.selectChannel(guild.id, channel.id) }
+                        name: `${user.global_name ?? user.username}`,
+                        type: SearchMenuType.User,
+                        action: async(app) => { await app.selectUser(user.id); }
                     })
                 }
+
+                this.draw();
             }
-            this.draw();
         });
+
+        discordController.on({ ev: 'message_create', cb: (data) => {
+            this.debugLog(`message.id = ${data.channel_id} | this.activeChannel = ${this.activeChannel}`);
+
+            if(data.channel_id == this.activeChannel) {
+                this.writeToMessages(`<${data.author.global_name}>: ${data.content}`);
+                this.draw();
+            }
+
+            // deal with adding the message to the message cache later
+
+            TermControls.bell();
+        }});
 
         discordController.connect(this.secrets.token);
     }
@@ -801,6 +757,10 @@ class App {
                 this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:theme$RESET $F_YELLOW<theme>$RESET - Set theme to $F_YELLOW<theme>$RESET`);
                 this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:connect$RESET       - Connect to Discord's servers`);
                 this.writeToMessages(` $F_CYAN-$RESET $F_GREEN:q$RESET             - Closes the app`);
+            break;
+
+            case ':test':
+                this.debugLog(slice('1234567890', 3).toString())
             break;
 
             case ':theme':
@@ -838,7 +798,10 @@ class App {
     }
 }
 
-const discordController = new DiscordController();
+
 const app = new App();
+const discordController = new DiscordController((s) => {
+    app.debugLog(s);
+});
 
 app.start();

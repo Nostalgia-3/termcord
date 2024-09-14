@@ -90,11 +90,30 @@ export type GuildChannel = {
     parent_id: string
 }
 
+export type ChatMessage = {
+    type: number,
+    content: string,
+    mentions: unknown[],
+    mention_roles: unknown[],
+    attachments: unknown[],
+    embeds: unknown[],
+    timestamp: string,
+    edited_timestamp: string|null,
+    flags: number,
+    components: unknown[],
+    id: string,
+    channel_id: string,
+    author: User,
+    pinned: boolean,
+    mention_everyone: boolean,
+    tts: boolean
+};
+
 export type User = {
     username: string,
     public_flags: number,
     id: string,
-    global_name: unknown | null,
+    global_name: string | null,
     discriminator: string,
     clan: unknown | null,
     avatar_decoration_data: unknown | null,
@@ -162,6 +181,7 @@ export type ReadState = {
 };
 
 export type PrivateChannel = {
+    /** dm = 1, group = 3 */
     type: number,
     safety_warnings: unknown[],
     recipient_ids: string[],
@@ -222,4 +242,15 @@ export type ReadyPacket = {
     api_code_version: number,
     analytics_token: string,
     _trace: string[]
+};
+
+export type ChannelUpdate = {
+    type: number, // 3 = group
+    recipients: User[],
+    owner_id: string,
+    name: string,
+    last_message_id: string,
+    id: string,
+    icon?: string, // <-- assuming since it's probably a content id
+    flags: number
 };
