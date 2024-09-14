@@ -2,6 +2,10 @@
 
 A bad terminal client for Discord written in Deno.
 
+## Notice
+
+Development on Termcord will basically be minimal until I can find, or make a good TUI library. The way I was doing UI before sucked and I want something more akin to web development (particularly with a flexbox type structure). I might do a few updates to the Discord Controller here and there, but until then, this won't really be usable.
+
 ## Quick Start
 
 NOTE: the following instructions are not great, but I do not want to setup a login system. Have fun putting your token in a random file 👍.
