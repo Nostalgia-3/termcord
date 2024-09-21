@@ -112,10 +112,10 @@ export function formatStyleString(s: string, fg: number[], bg: number[]): string
         .replaceAll(`$ITALICS`,     `\x1b[3m`)
         .replaceAll(`$UNDERLINE`,   `\x1b[4m`)
         .replaceAll(`$STRIKE`,      `\x1b[9m`)
-        .replaceAll(`$NO_BOLD`,     `\x1b[22m`) // fill these out
-        .replaceAll(`$NO_ITALICS`,  `\x1b[23m`) // fill these out
-        .replaceAll(`$NO_UNDERLINE`,`\x1b[24m`) // fill these out
-        .replaceAll(`$NO_STRIKE`,   `\x1b[29m`) // fill these out
+        .replaceAll(`$NO_BOLD`,     `\x1b[22m`)
+        .replaceAll(`$NO_ITALICS`,  `\x1b[23m`)
+        .replaceAll(`$NO_UNDERLINE`,`\x1b[24m`)
+        .replaceAll(`$NO_STRIKE`,   `\x1b[29m`)
         .replaceAll(`$RESET`,       `\x1b[0m${TermControls.rgb(fg, true)}${TermControls.rgb(bg, false)}`)
     ;
 

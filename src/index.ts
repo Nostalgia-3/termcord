@@ -30,7 +30,8 @@ enum SearchMenuType {
     Channel     = '$F_CYANC$RESET',
     Server      = '$F_BLUES$RESET',
     Category    = '$F_REDC$RESET',
-    User        = '$F_YELLOWU$RESET'
+    User        = '$F_YELLOWU$RESET',
+    Group       = '$F_REDG$RESET'
 };
 
 function putStrIn(s: string, put: string, x: number) {
@@ -80,6 +81,7 @@ class App {
 
     activeChannel: string;
 
+    // @TODO make this better (because I feel like this will lead to issues)
     currentChannel?: GuildChannel;
     currentServer?: { name: string, id: string, g: Guild };
     currentDM?: PrivateChannel;
@@ -88,7 +90,6 @@ class App {
 
     messages: Map<string, CachedMessage[]>;
 
-    // translations for names and such
     t = {
         name: 'Termcord',
         p_message_text: 'Message #%CHANNEL_NAME%',
@@ -347,7 +348,9 @@ class App {
         
         const ampm = (t.getHours() >= 12) ? 'PM' : 'AM';
 
-        return `$ITALICS${t.getDate().toString().padStart(2,'0')}/${t.getMonth()}/${t.getFullYear()}$RESET ${h}:${m} ${ampm}`;
+        // $ITALICS${t.getDate().toString().padStart(2,'0')}/${t.getMonth()}/${t.getFullYear()}$RESET 
+
+        return `$BOLD${h}:${m} ${ampm}$RESET`;
     }
 
     debugLog(msg: string) {
@@ -698,37 +701,46 @@ class App {
 
         console.clear();
 
-        discordController.on({ ev: 'loaded', cb: () => {
-                this.writeSystemMessage(`Connected to Discord!`);
-                for(const guild of discordController.getGuilds()) {
-                    // put guilds in fuzzy search for (ctrl+)k menu
-                    this.searchList.push({ name: guild.properties.name, type: SearchMenuType.Server, action:(app)=>{ app.selectGuild(guild.id) } });
+        discordController.on('ready', () => {
+            this.writeSystemMessage(`Connected to Discord!`);
+            for(const guild of discordController.getGuilds()) {
+                // put guilds in fuzzy search for (ctrl+)k menu
+                this.searchList.push({ name: guild.properties.name, type: SearchMenuType.Server, action:(app)=>{ app.selectGuild(guild.id) } });
 
-                    for (const channel of guild.channels) {
-                        // put channels in fuzzy search
-                        if(channel.type == 4) continue;
-                        this.searchList.push({
-                            name: `${channel.name} ($UNDERLINE$BOLD$F_CYAN${guild.properties.name}$RESET)`,
-                            type: SearchMenuType.Channel,
-                            action: async(app) => { await app.selectChannel(guild.id, channel.id) }
-                        });
-                    }
-                }
-
-                // put friends in fuzzy search
-                for(const user of discordController.getUsers()) {
+                for (const channel of guild.channels) {
+                    // put channels in fuzzy search
                     this.searchList.push({
-                        name: `${user.global_name ?? user.username}`,
-                        type: SearchMenuType.User,
-                        action: async(app) => { await app.selectUser(user.id); }
-                    })
+                        name: `${channel.name} ($UNDERLINE$BOLD$F_CYAN${guild.properties.name}$RESET)`,
+                        type: SearchMenuType.Channel,
+                        action: async(app) => { await app.selectChannel(guild.id, channel.id); }
+                    });
                 }
-
-                this.draw();
             }
+
+            // put friends in fuzzy search
+            for(const user of discordController.getUsers()) {
+                this.searchList.push({
+                    name: `${user.global_name ?? user.username}`,
+                    type: SearchMenuType.User,
+                    action: async(app) => { await app.selectUser(user.id); }
+                })
+            }
+
+            for(const group of discordController.getPrivateChannels()) {
+                if(group.type == 3) {
+                    this.searchList.push({
+                        name: `($UNDERLINE$BOLD$F_RED${group.id}$RESET)`,
+                        type: SearchMenuType.Group,
+                        action: (app) => { app.debugLog(`hello`); }
+                    });
+                }
+                // if(group.type == 3) this.debugLog(`${group.id} | ${group.flags.toString(2)}`);
+            }
+
+            this.draw();
         });
 
-        discordController.on({ ev: 'message_create', cb: (data) => {
+        discordController.on('message_create', (data) => {
             this.debugLog(`message.id = ${data.channel_id} | this.activeChannel = ${this.activeChannel}`);
 
             if(data.channel_id == this.activeChannel) {
@@ -739,13 +751,13 @@ class App {
             // deal with adding the message to the message cache later
 
             TermControls.bell();
-        }});
+        });
 
         discordController.connect(this.secrets.token);
     }
 
     parseCommand(s: string) {
-        const secs = s.split(' ');
+        const secs = s.trim().split(' ');
 
         switch(secs[0]) {
             case ':q': console.clear(); Deno.exit(0); break;
@@ -760,7 +772,7 @@ class App {
             break;
 
             case ':test':
-                this.debugLog(slice('1234567890', 3).toString())
+                this.debugLog(slice('1234567890', 3).toString());
             break;
 
             case ':theme':

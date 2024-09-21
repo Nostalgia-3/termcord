@@ -1,13 +1,55 @@
+export enum ActivityType {
+    Activity        = 0,
+    CustomStatus    = 4
+}
+
+export type Status = 'online' | 'idle' | 'dnd' | 'offline';
+
 export type SupplementalGuild = {
     voice_states: unknown[],
     id: string,
     embedded_activities: unknown[]
 };
 
-export type Activity    = unknown;
-export type Thread      = unknown;
-export type Sticker     = unknown;
-export type Emoji       = unknown;
+export type Emoji = {
+    name: string,
+    id: string,
+    animated: boolean
+};
+
+export type Thread  = unknown;
+export type Sticker = unknown;
+
+export type CustomStatusActivity = {
+    type: ActivityType.CustomStatus,
+    state: string,
+    name: string,
+    id: string,
+    emoji: Emoji,
+    created_at: number
+};
+
+export type NormalActivity = {
+    type: ActivityType.Activity,
+    timestamps: { start?: number, end?: number }, // assuming end exists
+    state: string,
+    session_id: string,
+    name: string,
+    id: string,
+    details: string,
+    created_at: number,
+    buttons: string[],
+    assets: {
+        small_text?: string,
+        small_image?: string,
+        large_text?: string,
+        large_image?: string
+    },
+
+    application_id: string
+};
+
+export type Activity    = CustomStatusActivity | NormalActivity;
 
 export type Guild = {
     version: number,
@@ -253,4 +295,11 @@ export type ChannelUpdate = {
     id: string,
     icon?: string, // <-- assuming since it's probably a content id
     flags: number
+};
+
+export type PresenceUpdate = {
+    user: { id: string },
+    status: Status,
+    client_status: { desktop?: Status }, // fill this out
+    activities: Activity[]
 };
