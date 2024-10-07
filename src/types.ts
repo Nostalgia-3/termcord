@@ -3,6 +3,20 @@ export enum ActivityType {
     CustomStatus    = 4
 }
 
+export enum AuthenticatorType {
+    WEBAUTHN        = 1,
+    TOTP            = 2,
+    SMS             = 3
+}
+
+export enum RelationshipType {
+    FRIEND = 1,
+    BLOCKED = 2,
+    INCOMING_REQUEST = 3,
+    OUTGOING_REQUEST = 4,
+    IMPLICIT = 5
+}
+
 export type Status = 'online' | 'idle' | 'dnd' | 'offline';
 
 export type SupplementalGuild = {
@@ -208,7 +222,7 @@ export type Session = {
 
 export type Relationship = {
     user_id: string,
-    type: number,
+    type: RelationshipType,
     nickname: string | null,
     id: string
 };
@@ -286,6 +300,20 @@ export type ReadyPacket = {
     _trace: string[]
 };
 
+export type Authenticator = {
+    id: string,
+    type: number,
+    name: string
+};
+
+// Events //
+
+export type TypingStart = {
+    user_id: string,
+    timestamp: number,
+    channel_id: string
+};
+
 export type ChannelUpdate = {
     type: number, // 3 = group
     recipients: User[],
@@ -298,7 +326,7 @@ export type ChannelUpdate = {
 };
 
 export type PresenceUpdate = {
-    user: { id: string },
+    /** User can sometimes only contain an ID */ user: User,
     status: Status,
     client_status: { desktop?: Status }, // fill this out
     activities: Activity[]
